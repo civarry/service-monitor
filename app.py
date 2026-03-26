@@ -7,7 +7,7 @@ Nobody needs to know this is Streamlit.
 import streamlit as st
 import requests
 import time
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 
 # ---------- CONFIGURATION ----------
@@ -20,6 +20,10 @@ TELEGRAM_CHAT_ID = st.secrets["TELEGRAM_CHAT_ID"]
 
 # Polling interval in seconds
 POLL_INTERVAL = 10
+
+# Daily heartbeat config (8:00 AM PHT)
+PHT = timezone(timedelta(hours=8))
+HEARTBEAT_HOUR = 8
 
 # Supabase REST API headers (service role — full access)
 HEADERS = {
@@ -104,6 +108,50 @@ def format_notification(msg):
     )
 
 
+# ---------- DAILY HEARTBEAT ----------
+
+def get_message_stats():
+    """Get message counts from Supabase to include in heartbeat"""
+    try:
+        # Count total messages
+        response = requests.get(
+            f"{SUPABASE_URL}/rest/v1/messages",
+            headers={**HEADERS, "Prefer": "count=exact"},
+            params={"select": "id", "limit": "0"},
+            timeout=10
+        )
+        response.raise_for_status()
+        total = response.headers.get("content-range", "0/0").split("/")[-1]
+
+        # Count pending messages
+        response = requests.get(
+            f"{SUPABASE_URL}/rest/v1/messages",
+            headers={**HEADERS, "Prefer": "count=exact"},
+            params={"select": "id", "status": "eq.pending", "limit": "0"},
+            timeout=10
+        )
+        response.raise_for_status()
+        pending = response.headers.get("content-range", "0/0").split("/")[-1]
+
+        return {"total": total, "pending": pending}
+    except requests.RequestException:
+        return {"total": "?", "pending": "?"}
+
+
+def send_heartbeat():
+    """Send daily status report via Telegram — also keeps Supabase active"""
+    stats = get_message_stats()
+    now = datetime.now(PHT).strftime("%Y-%m-%d %H:%M:%S PHT")
+    send_telegram_message(
+        f"<b>Daily Status Report</b>\n\n"
+        f"<b>Status:</b> Online\n"
+        f"<b>Time:</b> {now}\n"
+        f"<b>Total messages:</b> {stats['total']}\n"
+        f"<b>Pending:</b> {stats['pending']}\n\n"
+        f"<i>civarry.github.io is running.</i>"
+    )
+
+
 # ---------- PROCESS MESSAGES ----------
 
 def process_pending_messages():
@@ -151,9 +199,18 @@ st.caption("Monitoring in progress...")
 status_placeholder = st.empty()
 log_placeholder = st.empty()
 log_entries = []
+last_heartbeat_date = None
 
 while True:
     try:
+        # Daily heartbeat — sends once per day at HEARTBEAT_HOUR PHT
+        now_pht = datetime.now(PHT)
+        today = now_pht.date()
+        if now_pht.hour >= HEARTBEAT_HOUR and last_heartbeat_date != today:
+            send_heartbeat()
+            last_heartbeat_date = today
+            log_entries.append(f"[{now_pht.strftime('%H:%M:%S')}] Daily heartbeat sent")
+
         count = process_pending_messages()
 
         if count > 0:
