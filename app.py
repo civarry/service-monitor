@@ -7,6 +7,7 @@ Nobody needs to know this is Streamlit.
 import streamlit as st
 import requests
 import time
+import html
 from datetime import datetime, timezone, timedelta
 
 
@@ -50,8 +51,7 @@ def fetch_pending_messages():
         )
         response.raise_for_status()
         return response.json()
-    except requests.RequestException as e:
-        st.error(f"Supabase fetch error: {e}")
+    except requests.RequestException:
         return []
 
 
@@ -64,14 +64,13 @@ def update_message_status(message_id, status):
             params={"id": f"eq.{message_id}"},
             json={
                 "status": status,
-                "processed_at": datetime.utcnow().isoformat()
+                "processed_at": datetime.now(timezone.utc).isoformat()
             },
             timeout=10
         )
         response.raise_for_status()
         return True
-    except requests.RequestException as e:
-        st.error(f"Supabase update error: {e}")
+    except requests.RequestException:
         return False
 
 
@@ -91,8 +90,7 @@ def send_telegram_message(text):
         )
         response.raise_for_status()
         return True
-    except requests.RequestException as e:
-        st.error(f"Telegram error: {e}")
+    except requests.RequestException:
         return False
 
 
@@ -104,11 +102,15 @@ def format_notification(msg):
         timestamp = utc_dt.astimezone(PHT).strftime("%Y-%m-%d %I:%M %p PHT")
     except (ValueError, AttributeError):
         timestamp = raw_ts or "Unknown time"
+    # Escape user content to prevent HTML injection in Telegram
+    name = html.escape(msg.get("name", ""))
+    email = html.escape(msg.get("email", ""))
+    message = html.escape(msg.get("message", ""))
     return (
         f"<b>New Contact Form Message</b>\n\n"
-        f"<b>From:</b> {msg['name']}\n"
-        f"<b>Email:</b> {msg['email']}\n"
-        f"<b>Message:</b>\n{msg['message']}\n\n"
+        f"<b>From:</b> {name}\n"
+        f"<b>Email:</b> {email}\n"
+        f"<b>Message:</b>\n{message}\n\n"
         f"<i>Received: {timestamp}</i>"
     )
 
@@ -273,10 +275,16 @@ with col4:
 
 st.divider()
 
-# Two-column layout: status + activity log
-left_col, right_col = st.columns([1, 2])
+# Two-column layout: activity log + system info
+left_col, right_col = st.columns([3, 2])
 
 with left_col:
+    st.markdown("##### :material/history: Activity Log")
+    log_container = st.container(border=True, height=300)
+    with log_container:
+        log_placeholder = st.empty()
+
+with right_col:
     st.markdown("##### :material/info: System Info")
     with st.container(border=True):
         now_pht = datetime.now(PHT)
@@ -290,12 +298,6 @@ with left_col:
         st.markdown(":material/database: Supabase — Connected")
         st.markdown(":material/send: Telegram — Connected")
         st.markdown(":material/language: Frontend — civarry.github.io")
-
-with right_col:
-    st.markdown("##### :material/history: Activity Log")
-    log_container = st.container(border=True, height=280)
-    with log_container:
-        log_placeholder = st.empty()
 
 # Bottom status bar
 st.divider()
@@ -343,8 +345,7 @@ while True:
             with s2:
                 st.caption(f":material/mail: Session total: {session_processed} processed")
 
-    except Exception as e:
-        with status_placeholder.container():
-            st.error(f"Error: {e}")
+    except Exception:
+        pass
 
     time.sleep(POLL_INTERVAL)
