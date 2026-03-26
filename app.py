@@ -301,13 +301,11 @@ while True:
 
         # Update status bar
         with status_placeholder.container():
-            s1, s2, s3 = st.columns(3)
+            s1, s2 = st.columns(2)
             with s1:
                 st.caption(f":material/schedule: Last poll: {datetime.now(PHT).strftime('%Y-%m-%d %H:%M:%S')} PHT")
             with s2:
                 st.caption(f":material/mail: Session total: {session_processed} processed")
-            with s3:
-                st.caption(f":material/update: Next poll in {POLL_INTERVAL}s")
 
     except Exception as e:
         with status_placeholder.container():
