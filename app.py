@@ -584,6 +584,19 @@ status_placeholder = st.empty()
 
 # ---------- THE ACTUAL BACKEND LOOP ----------
 
+# Register Telegram bot command menu
+try:
+    requests.post(
+        f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setMyCommands",
+        json={"commands": [
+            {"command": "darkmode", "description": "Toggle theme — /darkmode on|off"},
+            {"command": "announce", "description": "Site banner — /announce <msg> --flash 20s"},
+        ]},
+        timeout=10
+    )
+except requests.RequestException:
+    pass
+
 log_entries = fetch_recent_logs()
 session_processed = 0
 last_update_id = clear_old_updates()
