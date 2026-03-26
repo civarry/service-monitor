@@ -138,6 +138,42 @@ def get_message_stats():
         return {"total": "?", "pending": "?"}
 
 
+def get_last_heartbeat_date():
+    """Get the last heartbeat date from Supabase app_state"""
+    try:
+        response = requests.get(
+            f"{SUPABASE_URL}/rest/v1/app_state",
+            headers=HEADERS,
+            params={"key": "eq.last_heartbeat_date", "select": "value"},
+            timeout=10
+        )
+        response.raise_for_status()
+        rows = response.json()
+        if rows:
+            return rows[0]["value"]
+        return None
+    except requests.RequestException:
+        return None
+
+
+def set_last_heartbeat_date(date_str):
+    """Save the last heartbeat date to Supabase app_state (upsert)"""
+    try:
+        response = requests.post(
+            f"{SUPABASE_URL}/rest/v1/app_state",
+            headers={**HEADERS, "Prefer": "resolution=merge-duplicates,return=representation"},
+            json={
+                "key": "last_heartbeat_date",
+                "value": date_str,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            },
+            timeout=10
+        )
+        response.raise_for_status()
+    except requests.RequestException:
+        pass
+
+
 def send_heartbeat():
     """Send daily status report via Telegram — also keeps Supabase active"""
     stats = get_message_stats()
@@ -263,17 +299,17 @@ status_placeholder = st.empty()
 # ---------- THE ACTUAL BACKEND LOOP ----------
 
 log_entries = []
-last_heartbeat_date = None
 session_processed = 0
 
 while True:
     try:
         # Daily heartbeat — sends once per day at HEARTBEAT_HOUR PHT
+        # Uses Supabase to track last send date so it survives session restarts
         now_pht = datetime.now(PHT)
-        today = now_pht.date()
-        if now_pht.hour >= HEARTBEAT_HOUR and last_heartbeat_date != today:
+        today_str = now_pht.date().isoformat()
+        if now_pht.hour >= HEARTBEAT_HOUR and get_last_heartbeat_date() != today_str:
             send_heartbeat()
-            last_heartbeat_date = today
+            set_last_heartbeat_date(today_str)
             log_entries.append(
                 f":material/favorite: `{now_pht.strftime('%H:%M:%S')}` — Daily heartbeat sent"
             )
