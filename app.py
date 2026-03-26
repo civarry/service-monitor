@@ -342,22 +342,24 @@ def handle_command(text):
             save_log_entry("command", "Announcement cleared via Telegram")
             return
 
-        # Parse: /announce <message> --time <type> <duration>
+        # Parse: /announce <message> --flash 20s | --persist
         atype = "flash"
         duration = 20
         message = rest
 
-        if "--time" in rest:
-            idx = rest.rfind("--time")
+        if "--persist" in rest:
+            idx = rest.rfind("--persist")
             message = rest[:idx].strip()
-            time_part = rest[idx + 6:].strip().split()
-            if len(time_part) >= 1:
-                atype = time_part[0].lower()
-            if len(time_part) >= 2:
-                duration = int("".join(c for c in time_part[1] if c.isdigit()) or "20")
+            atype = "persistent"
+            duration = 0
+        elif "--flash" in rest:
+            idx = rest.rfind("--flash")
+            message = rest[:idx].strip()
+            duration_str = rest[idx + 7:].strip()
+            duration = int("".join(c for c in duration_str if c.isdigit()) or "20")
 
         if not message:
-            send_telegram_message("Usage:\n/announce Hello world --time flash 20seconds\n/announce off")
+            send_telegram_message("Usage:\n/announce Hello world\n/announce Hello --flash 20s\n/announce Hello --persist\n/announce off")
             return
 
         update_site_setting("announce", {
