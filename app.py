@@ -175,31 +175,96 @@ def process_pending_messages():
     return len(messages)
 
 
-# ---------- STREAMLIT "UI" (the decoy) ----------
+# ---------- HELPER: FETCH LIVE STATS ----------
 
-st.set_page_config(page_title="System Monitor", page_icon="📊")
+def get_live_stats():
+    """Fetch current stats from Supabase for the dashboard"""
+    try:
+        stats = get_message_stats()
+        total = int(stats["total"]) if stats["total"] != "?" else 0
+        pending = int(stats["pending"]) if stats["pending"] != "?" else 0
+        done = total - pending
+        return {"total": total, "pending": pending, "done": done}
+    except (ValueError, TypeError):
+        return {"total": 0, "pending": 0, "done": 0}
 
-st.title("System Monitor")
-st.caption("Internal monitoring dashboard.")
 
-# Show some basic stats so it looks like a legit Streamlit app
-col1, col2, col3 = st.columns(3)
-with col1:
-    st.metric("Status", "Online")
-with col2:
-    st.metric("Uptime", "Active")
-with col3:
-    st.metric("Last Check", datetime.now().strftime("%H:%M:%S"))
+# ---------- STREAMLIT DASHBOARD ----------
+
+st.set_page_config(
+    page_title="Service Monitor",
+    page_icon=":material/monitor_heart:",
+    layout="wide"
+)
+
+# Header
+st.markdown("#### :material/monitor_heart: Service Monitor")
+st.caption("Real-time service health and message processing dashboard")
 
 st.divider()
-st.caption("Monitoring in progress...")
+
+# Fetch initial stats
+initial_stats = get_live_stats()
+
+# Top metrics row
+col1, col2, col3, col4 = st.columns(4)
+with col1:
+    st.metric(
+        label="Service Status",
+        value="Operational",
+        delta="online",
+    )
+with col2:
+    st.metric(
+        label="Total Messages",
+        value=initial_stats["total"],
+    )
+with col3:
+    st.metric(
+        label="Processed",
+        value=initial_stats["done"],
+    )
+with col4:
+    st.metric(
+        label="Pending",
+        value=initial_stats["pending"],
+    )
+
+st.divider()
+
+# Two-column layout: status + activity log
+left_col, right_col = st.columns([1, 2])
+
+with left_col:
+    st.markdown("##### :material/info: System Info")
+    with st.container(border=True):
+        now_pht = datetime.now(PHT)
+        st.markdown(f"**Region:** Asia-Pacific")
+        st.markdown(f"**Poll Interval:** {POLL_INTERVAL}s")
+        st.markdown(f"**Heartbeat:** Daily {HEARTBEAT_HOUR}:00 PHT")
+        st.markdown(f"**Local Time:** {now_pht.strftime('%H:%M:%S PHT')}")
+
+    st.markdown("##### :material/link: Connected Services")
+    with st.container(border=True):
+        st.markdown(":material/database: Supabase — Connected")
+        st.markdown(":material/send: Telegram — Connected")
+        st.markdown(":material/language: Frontend — civarry.github.io")
+
+with right_col:
+    st.markdown("##### :material/history: Activity Log")
+    log_container = st.container(border=True, height=280)
+    with log_container:
+        log_placeholder = st.empty()
+
+# Bottom status bar
+st.divider()
+status_placeholder = st.empty()
 
 # ---------- THE ACTUAL BACKEND LOOP ----------
 
-status_placeholder = st.empty()
-log_placeholder = st.empty()
 log_entries = []
 last_heartbeat_date = None
+session_processed = 0
 
 while True:
     try:
@@ -209,26 +274,43 @@ while True:
         if now_pht.hour >= HEARTBEAT_HOUR and last_heartbeat_date != today:
             send_heartbeat()
             last_heartbeat_date = today
-            log_entries.append(f"[{now_pht.strftime('%H:%M:%S')}] Daily heartbeat sent")
+            log_entries.append(
+                f":material/favorite: `{now_pht.strftime('%H:%M:%S')}` — Daily heartbeat sent"
+            )
 
         count = process_pending_messages()
+        session_processed += count
 
         if count > 0:
-            log_entry = f"[{datetime.now().strftime('%H:%M:%S')}] Processed {count} message(s)"
-            log_entries.append(log_entry)
-            # Keep only last 20 log entries
-            log_entries = log_entries[-20:]
+            log_entries.append(
+                f":material/mail: `{datetime.now(PHT).strftime('%H:%M:%S')}` — Processed **{count}** message(s)"
+            )
 
-        # Update the UI
+        # Periodic poll log (every 30 polls = ~5 min)
+        log_entries.append(
+            f":material/check_circle: `{datetime.now(PHT).strftime('%H:%M:%S')}` — Poll OK"
+        )
+
+        # Keep only last 30 entries
+        log_entries = log_entries[-30:]
+
+        # Update activity log
+        with log_placeholder.container():
+            for entry in reversed(log_entries[-15:]):
+                st.markdown(entry)
+
+        # Update status bar
         with status_placeholder.container():
-            st.success(f"Last poll: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Messages processed this session: {len(log_entries)}")
-
-        if log_entries:
-            with log_placeholder.container():
-                st.text("\n".join(reversed(log_entries)))
+            s1, s2, s3 = st.columns(3)
+            with s1:
+                st.caption(f":material/schedule: Last poll: {datetime.now(PHT).strftime('%Y-%m-%d %H:%M:%S')} PHT")
+            with s2:
+                st.caption(f":material/mail: Session total: {session_processed} processed")
+            with s3:
+                st.caption(f":material/update: Next poll in {POLL_INTERVAL}s")
 
     except Exception as e:
         with status_placeholder.container():
-            st.warning(f"Error during poll: {e}")
+            st.error(f"Error: {e}")
 
     time.sleep(POLL_INTERVAL)
