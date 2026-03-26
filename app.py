@@ -581,6 +581,12 @@ status_placeholder = st.empty()
 
 # ---------- THE ACTUAL BACKEND LOOP ----------
 
+# Ensure no webhook conflicts with getUpdates polling
+try:
+    requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/deleteWebhook", timeout=10)
+except requests.RequestException:
+    pass
+
 # Register Telegram bot command menu
 try:
     requests.post(
