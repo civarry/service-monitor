@@ -286,11 +286,6 @@ while True:
                 f":material/mail: `{datetime.now(PHT).strftime('%H:%M:%S')}` — Processed **{count}** message(s)"
             )
 
-        # Periodic poll log (every 30 polls = ~5 min)
-        log_entries.append(
-            f":material/check_circle: `{datetime.now(PHT).strftime('%H:%M:%S')}` — Poll OK"
-        )
-
         # Keep only last 30 entries
         log_entries = log_entries[-30:]
 
