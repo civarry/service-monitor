@@ -13,20 +13,15 @@ from datetime import datetime, timezone, timedelta
 
 # ---------- CONFIGURATION ----------
 
-# Load from Streamlit secrets (.streamlit/secrets.toml or Streamlit Cloud secrets)
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_SERVICE_KEY = st.secrets["SUPABASE_SERVICE_KEY"]
 TELEGRAM_BOT_TOKEN = st.secrets["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHAT_ID = st.secrets["TELEGRAM_CHAT_ID"]
 
-# Polling interval in seconds
 POLL_INTERVAL = 10
-
-# Daily heartbeat config (8:00 AM PHT)
 PHT = timezone(timedelta(hours=8))
 HEARTBEAT_HOUR = 8
 
-# Supabase REST API headers (service role — full access)
 HEADERS = {
     "apikey": SUPABASE_SERVICE_KEY,
     "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
@@ -35,18 +30,180 @@ HEADERS = {
 }
 
 
+# ---------- CUSTOM STYLES ----------
+
+CUSTOM_CSS = """
+<style>
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
+@keyframes slideIn {
+    from { opacity: 0; transform: translateX(-8px); }
+    to { opacity: 1; transform: translateX(0); }
+}
+
+/* Hide Streamlit defaults */
+#MainMenu, footer, header { visibility: hidden; }
+
+/* Animated header */
+.monitor-header {
+    animation: fadeIn 0.6s ease;
+    padding: 0.5rem 0 1rem 0;
+}
+.monitor-header h1 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #e0e0e0;
+    margin: 0;
+    letter-spacing: -0.5px;
+}
+.monitor-header p {
+    font-size: 0.8rem;
+    color: #666;
+    margin: 0.25rem 0 0 0;
+}
+
+/* Status indicator */
+.status-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #22c55e;
+    margin-right: 6px;
+    animation: pulse 2s ease-in-out infinite;
+}
+
+/* Metric cards */
+.metric-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.75rem;
+    animation: fadeIn 0.6s ease 0.1s both;
+}
+.metric-card {
+    background: #111;
+    border: 1px solid #1e1e1e;
+    border-radius: 10px;
+    padding: 1.25rem;
+    transition: border-color 0.2s;
+}
+.metric-card:hover {
+    border-color: #333;
+}
+.metric-label {
+    font-size: 0.7rem;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 0.4rem;
+}
+.metric-value {
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: #e0e0e0;
+    line-height: 1.2;
+}
+.metric-value.status {
+    font-size: 1.1rem;
+    color: #22c55e;
+}
+
+/* Info grid */
+.info-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+    animation: fadeIn 0.6s ease 0.2s both;
+}
+.info-card {
+    background: #111;
+    border: 1px solid #1e1e1e;
+    border-radius: 10px;
+    padding: 1.25rem;
+}
+.info-card h3 {
+    font-size: 0.75rem;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin: 0 0 0.75rem 0;
+}
+.info-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.35rem 0;
+    border-bottom: 1px solid #1a1a1a;
+    font-size: 0.8rem;
+}
+.info-row:last-child { border-bottom: none; }
+.info-key { color: #888; }
+.info-val { color: #ccc; font-weight: 500; }
+
+/* Service badges */
+.service-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0.35rem 0.7rem;
+    background: rgba(34, 197, 94, 0.08);
+    border: 1px solid rgba(34, 197, 94, 0.15);
+    border-radius: 6px;
+    font-size: 0.75rem;
+    color: #22c55e;
+    margin: 0.2rem 0.3rem 0.2rem 0;
+}
+
+/* Log entries */
+.log-entry {
+    padding: 0.5rem 0.75rem;
+    border-left: 2px solid #1e1e1e;
+    margin-bottom: 0.4rem;
+    font-size: 0.8rem;
+    color: #999;
+    animation: slideIn 0.3s ease;
+}
+.log-entry.heartbeat { border-left-color: #f59e0b; }
+.log-entry.message { border-left-color: #3b82f6; }
+.log-entry .log-time {
+    color: #555;
+    font-family: monospace;
+    font-size: 0.7rem;
+    margin-right: 0.5rem;
+}
+
+/* Status bar */
+.status-bar {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.75rem 0;
+    font-size: 0.75rem;
+    color: #555;
+    animation: fadeIn 0.6s ease 0.3s both;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .metric-row { grid-template-columns: repeat(2, 1fr); }
+    .info-grid { grid-template-columns: 1fr; }
+}
+</style>
+"""
+
+
 # ---------- SUPABASE FUNCTIONS ----------
 
 def fetch_pending_messages():
-    """Fetch all pending messages from Supabase"""
     try:
         response = requests.get(
             f"{SUPABASE_URL}/rest/v1/messages",
             headers=HEADERS,
-            params={
-                "status": "eq.pending",
-                "order": "created_at.asc"
-            },
+            params={"status": "eq.pending", "order": "created_at.asc"},
             timeout=10
         )
         response.raise_for_status()
@@ -56,16 +213,12 @@ def fetch_pending_messages():
 
 
 def update_message_status(message_id, status):
-    """Update a message's status in Supabase"""
     try:
         response = requests.patch(
             f"{SUPABASE_URL}/rest/v1/messages",
             headers=HEADERS,
             params={"id": f"eq.{message_id}"},
-            json={
-                "status": status,
-                "processed_at": datetime.now(timezone.utc).isoformat()
-            },
+            json={"status": status, "processed_at": datetime.now(timezone.utc).isoformat()},
             timeout=10
         )
         response.raise_for_status()
@@ -77,15 +230,10 @@ def update_message_status(message_id, status):
 # ---------- TELEGRAM FUNCTIONS ----------
 
 def send_telegram_message(text):
-    """Send a message via Telegram Bot API"""
     try:
         response = requests.post(
             f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-            json={
-                "chat_id": TELEGRAM_CHAT_ID,
-                "text": text,
-                "parse_mode": "HTML"
-            },
+            json={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "HTML"},
             timeout=10
         )
         response.raise_for_status()
@@ -95,14 +243,12 @@ def send_telegram_message(text):
 
 
 def format_notification(msg):
-    """Format a message into a Telegram notification"""
     raw_ts = msg.get("created_at", "")
     try:
         utc_dt = datetime.fromisoformat(raw_ts.replace("Z", "+00:00"))
         timestamp = utc_dt.astimezone(PHT).strftime("%Y-%m-%d %I:%M %p PHT")
     except (ValueError, AttributeError):
         timestamp = raw_ts or "Unknown time"
-    # Escape user content to prevent HTML injection in Telegram
     name = html.escape(msg.get("name", ""))
     email = html.escape(msg.get("email", ""))
     message = html.escape(msg.get("message", ""))
@@ -115,12 +261,10 @@ def format_notification(msg):
     )
 
 
-# ---------- DAILY HEARTBEAT ----------
+# ---------- HEARTBEAT ----------
 
 def get_message_stats():
-    """Get message counts from Supabase to include in heartbeat"""
     try:
-        # Count total messages
         response = requests.get(
             f"{SUPABASE_URL}/rest/v1/messages",
             headers={**HEADERS, "Prefer": "count=exact"},
@@ -130,7 +274,6 @@ def get_message_stats():
         response.raise_for_status()
         total = response.headers.get("content-range", "0/0").split("/")[-1]
 
-        # Count pending messages
         response = requests.get(
             f"{SUPABASE_URL}/rest/v1/messages",
             headers={**HEADERS, "Prefer": "count=exact"},
@@ -146,7 +289,6 @@ def get_message_stats():
 
 
 def get_last_heartbeat_date():
-    """Get the last heartbeat date from Supabase app_state"""
     try:
         response = requests.get(
             f"{SUPABASE_URL}/rest/v1/app_state",
@@ -156,33 +298,24 @@ def get_last_heartbeat_date():
         )
         response.raise_for_status()
         rows = response.json()
-        if rows:
-            return rows[0]["value"]
-        return None
+        return rows[0]["value"] if rows else None
     except requests.RequestException:
         return None
 
 
 def set_last_heartbeat_date(date_str):
-    """Save the last heartbeat date to Supabase app_state (upsert)"""
     try:
-        response = requests.post(
+        requests.post(
             f"{SUPABASE_URL}/rest/v1/app_state",
             headers={**HEADERS, "Prefer": "resolution=merge-duplicates,return=representation"},
-            json={
-                "key": "last_heartbeat_date",
-                "value": date_str,
-                "updated_at": datetime.now(timezone.utc).isoformat()
-            },
+            json={"key": "last_heartbeat_date", "value": date_str, "updated_at": datetime.now(timezone.utc).isoformat()},
             timeout=10
         )
-        response.raise_for_status()
     except requests.RequestException:
         pass
 
 
 def send_heartbeat():
-    """Send daily status report via Telegram — also keeps Supabase active"""
     stats = get_message_stats()
     now = datetime.now(PHT).strftime("%Y-%m-%d %H:%M:%S PHT")
     send_telegram_message(
@@ -198,109 +331,100 @@ def send_heartbeat():
 # ---------- PROCESS MESSAGES ----------
 
 def process_pending_messages():
-    """Fetch pending messages, send Telegram notifications, update status"""
     messages = fetch_pending_messages()
-
     for msg in messages:
-        # Mark as processing
         update_message_status(msg["id"], "processing")
-
-        # Send Telegram notification
         notification = format_notification(msg)
         success = send_telegram_message(notification)
-
-        # Update final status
-        if success:
-            update_message_status(msg["id"], "done")
-        else:
-            update_message_status(msg["id"], "failed")
-
+        update_message_status(msg["id"], "done" if success else "failed")
     return len(messages)
 
 
-# ---------- HELPER: FETCH LIVE STATS ----------
-
 def get_live_stats():
-    """Fetch current stats from Supabase for the dashboard"""
     try:
         stats = get_message_stats()
         total = int(stats["total"]) if stats["total"] != "?" else 0
         pending = int(stats["pending"]) if stats["pending"] != "?" else 0
-        done = total - pending
-        return {"total": total, "pending": pending, "done": done}
+        return {"total": total, "pending": pending, "done": total - pending}
     except (ValueError, TypeError):
         return {"total": 0, "pending": 0, "done": 0}
 
 
 # ---------- STREAMLIT DASHBOARD ----------
 
-st.set_page_config(
-    page_title="Service Monitor",
-    page_icon=":material/monitor_heart:",
-    layout="wide"
-)
+st.set_page_config(page_title="Service Monitor", page_icon=":material/monitor_heart:", layout="wide")
+
+# Inject custom CSS
+st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
+
+# Fetch stats
+stats = get_live_stats()
+now_pht = datetime.now(PHT)
 
 # Header
-st.markdown("#### :material/monitor_heart: Service Monitor")
-st.caption("Real-time service health and message processing dashboard")
+st.markdown("""
+<div class="monitor-header">
+    <h1><span class="status-dot"></span> Service Monitor</h1>
+    <p>Real-time message processing and service health</p>
+</div>
+""", unsafe_allow_html=True)
 
-st.divider()
+# Metric cards
+st.markdown(f"""
+<div class="metric-row">
+    <div class="metric-card">
+        <div class="metric-label">Status</div>
+        <div class="metric-value status"><span class="status-dot"></span> Operational</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-label">Total Messages</div>
+        <div class="metric-value">{stats['total']}</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-label">Processed</div>
+        <div class="metric-value">{stats['done']}</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-label">Pending</div>
+        <div class="metric-value">{stats['pending']}</div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
-# Fetch initial stats
-initial_stats = get_live_stats()
+st.markdown("<br>", unsafe_allow_html=True)
 
-# Top metrics row
-col1, col2, col3, col4 = st.columns(4)
-with col1:
-    st.metric(
-        label="Service Status",
-        value="Operational",
-        delta="online",
-    )
-with col2:
-    st.metric(
-        label="Total Messages",
-        value=initial_stats["total"],
-    )
-with col3:
-    st.metric(
-        label="Processed",
-        value=initial_stats["done"],
-    )
-with col4:
-    st.metric(
-        label="Pending",
-        value=initial_stats["pending"],
-    )
+# Info grid + Activity log
+st.markdown(f"""
+<div class="info-grid">
+    <div class="info-card">
+        <h3>System Info</h3>
+        <div class="info-row"><span class="info-key">Region</span><span class="info-val">Asia-Pacific</span></div>
+        <div class="info-row"><span class="info-key">Poll Interval</span><span class="info-val">{POLL_INTERVAL}s</span></div>
+        <div class="info-row"><span class="info-key">Heartbeat</span><span class="info-val">Daily {HEARTBEAT_HOUR}:00 PHT</span></div>
+        <div class="info-row"><span class="info-key">Local Time</span><span class="info-val">{now_pht.strftime('%H:%M:%S PHT')}</span></div>
+    </div>
+    <div class="info-card">
+        <h3>Connected Services</h3>
+        <div style="padding: 0.25rem 0;">
+            <span class="service-badge">Supabase</span>
+            <span class="service-badge">Telegram</span>
+            <span class="service-badge">GitHub Pages</span>
+        </div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
-st.divider()
+st.markdown("<br>", unsafe_allow_html=True)
 
-# Two-column layout: activity log + system info
-left_col, right_col = st.columns([3, 2])
+# Activity log (Streamlit-managed for live updates)
+st.markdown('<div style="animation: fadeIn 0.6s ease 0.3s both;">', unsafe_allow_html=True)
+st.markdown("##### Activity Log")
+log_container = st.container(border=True, height=250)
+with log_container:
+    log_placeholder = st.empty()
+st.markdown('</div>', unsafe_allow_html=True)
 
-with left_col:
-    st.markdown("##### :material/history: Activity Log")
-    log_container = st.container(border=True, height=300)
-    with log_container:
-        log_placeholder = st.empty()
-
-with right_col:
-    st.markdown("##### :material/info: System Info")
-    with st.container(border=True):
-        now_pht = datetime.now(PHT)
-        st.markdown(f"**Region:** Asia-Pacific")
-        st.markdown(f"**Poll Interval:** {POLL_INTERVAL}s")
-        st.markdown(f"**Heartbeat:** Daily {HEARTBEAT_HOUR}:00 PHT")
-        st.markdown(f"**Local Time:** {now_pht.strftime('%H:%M:%S PHT')}")
-
-    st.markdown("##### :material/link: Connected Services")
-    with st.container(border=True):
-        st.markdown(":material/database: Supabase — Connected")
-        st.markdown(":material/send: Telegram — Connected")
-        st.markdown(":material/language: Frontend — civarry.github.io")
-
-# Bottom status bar
-st.divider()
+# Status bar placeholder
 status_placeholder = st.empty()
 
 # ---------- THE ACTUAL BACKEND LOOP ----------
@@ -310,40 +434,39 @@ session_processed = 0
 
 while True:
     try:
-        # Daily heartbeat — sends once per day at HEARTBEAT_HOUR PHT
-        # Uses Supabase to track last send date so it survives session restarts
         now_pht = datetime.now(PHT)
         today_str = now_pht.date().isoformat()
         if now_pht.hour >= HEARTBEAT_HOUR and get_last_heartbeat_date() != today_str:
             send_heartbeat()
             set_last_heartbeat_date(today_str)
-            log_entries.append(
-                f":material/favorite: `{now_pht.strftime('%H:%M:%S')}` — Daily heartbeat sent"
-            )
+            log_entries.append(("heartbeat", now_pht.strftime('%H:%M:%S'), "Daily heartbeat sent"))
 
         count = process_pending_messages()
         session_processed += count
 
         if count > 0:
-            log_entries.append(
-                f":material/mail: `{datetime.now(PHT).strftime('%H:%M:%S')}` — Processed **{count}** message(s)"
-            )
+            log_entries.append(("message", datetime.now(PHT).strftime('%H:%M:%S'), f"Processed {count} message(s)"))
 
-        # Keep only last 30 entries
         log_entries = log_entries[-30:]
 
-        # Update activity log
+        # Render activity log with styled HTML
         with log_placeholder.container():
-            for entry in reversed(log_entries[-15:]):
-                st.markdown(entry)
+            if log_entries:
+                log_html = ""
+                for entry_type, ts, text in reversed(log_entries[-15:]):
+                    log_html += f'<div class="log-entry {entry_type}"><span class="log-time">{ts}</span>{text}</div>'
+                st.markdown(log_html, unsafe_allow_html=True)
+            else:
+                st.markdown('<div style="color:#444; font-size:0.8rem; padding:1rem;">Waiting for activity...</div>', unsafe_allow_html=True)
 
-        # Update status bar
+        # Status bar
         with status_placeholder.container():
-            s1, s2 = st.columns(2)
-            with s1:
-                st.caption(f":material/schedule: Last poll: {datetime.now(PHT).strftime('%Y-%m-%d %H:%M:%S')} PHT")
-            with s2:
-                st.caption(f":material/mail: Session total: {session_processed} processed")
+            st.markdown(f"""
+            <div class="status-bar">
+                <span>Last poll: {datetime.now(PHT).strftime('%Y-%m-%d %H:%M:%S')} PHT</span>
+                <span>Session: {session_processed} processed</span>
+            </div>
+            """, unsafe_allow_html=True)
 
     except Exception:
         pass
