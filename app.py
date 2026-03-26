@@ -170,6 +170,7 @@ CUSTOM_CSS = """
 }
 .log-entry.heartbeat { border-left-color: #f59e0b; }
 .log-entry.message { border-left-color: #3b82f6; }
+.log-entry.command { border-left-color: #a855f7; }
 .log-entry .log-time {
     color: #555;
     font-family: monospace;
@@ -262,6 +263,118 @@ def fetch_recent_logs(limit=30):
         return entries
     except requests.RequestException:
         return []
+
+
+# ---------- SITE SETTINGS FUNCTIONS ----------
+
+def update_site_setting(key, value):
+    try:
+        requests.post(
+            f"{SUPABASE_URL}/rest/v1/site_settings",
+            headers={**HEADERS, "Prefer": "resolution=merge-duplicates,return=representation"},
+            json={"key": key, "value": value, "updated_at": datetime.now(timezone.utc).isoformat()},
+            timeout=10
+        )
+        return True
+    except requests.RequestException:
+        return False
+
+
+# ---------- TELEGRAM COMMAND HANDLING ----------
+
+def get_telegram_updates(last_id):
+    try:
+        response = requests.get(
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates",
+            params={"offset": last_id + 1, "timeout": 0},
+            timeout=10
+        )
+        response.raise_for_status()
+        data = response.json()
+        if data.get("ok"):
+            return data.get("result", [])
+        return []
+    except requests.RequestException:
+        return []
+
+
+def clear_old_updates():
+    try:
+        response = requests.get(
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates",
+            params={"timeout": 0},
+            timeout=10
+        )
+        response.raise_for_status()
+        data = response.json()
+        if data.get("ok") and data.get("result"):
+            return data["result"][-1]["update_id"]
+        return 0
+    except requests.RequestException:
+        return 0
+
+
+def handle_command(text):
+    text = text.strip()
+
+    if text.startswith("/darkmode"):
+        parts = text.split()
+        if len(parts) >= 2 and parts[1].lower() in ("on", "off"):
+            mode = parts[1].lower()
+            if mode == "on":
+                update_site_setting("theme", "dark")
+                send_telegram_message("<b>Dark mode enabled.</b>")
+                save_log_entry("command", "Dark mode enabled via Telegram")
+            else:
+                update_site_setting("theme", "light")
+                send_telegram_message("<b>Light mode enabled.</b>")
+                save_log_entry("command", "Light mode enabled via Telegram")
+        else:
+            send_telegram_message("Usage: /darkmode on|off")
+        return
+
+    if text.startswith("/announce"):
+        rest = text[len("/announce"):].strip()
+
+        if not rest or rest.lower() == "off":
+            update_site_setting("announce", {"active": False, "message": "", "type": "flash", "duration": 0})
+            send_telegram_message("<b>Announcement cleared.</b>")
+            save_log_entry("command", "Announcement cleared via Telegram")
+            return
+
+        # Parse: /announce <message> --time <type> <duration>
+        atype = "flash"
+        duration = 20
+        message = rest
+
+        if "--time" in rest:
+            idx = rest.rfind("--time")
+            message = rest[:idx].strip()
+            time_part = rest[idx + 6:].strip().split()
+            if len(time_part) >= 1:
+                atype = time_part[0].lower()
+            if len(time_part) >= 2:
+                duration = int("".join(c for c in time_part[1] if c.isdigit()) or "20")
+
+        if not message:
+            send_telegram_message("Usage:\n/announce Hello world --time flash 20seconds\n/announce off")
+            return
+
+        update_site_setting("announce", {
+            "active": True,
+            "message": message,
+            "type": atype,
+            "duration": duration
+        })
+        duration_label = f"{duration}s" if atype == "flash" else "until cleared"
+        send_telegram_message(
+            f"<b>Announcement set</b>\n\n"
+            f"<b>Message:</b> {html.escape(message)}\n"
+            f"<b>Type:</b> {atype}\n"
+            f"<b>Duration:</b> {duration_label}"
+        )
+        save_log_entry("command", f"Announcement: {message}")
+        return
 
 
 # ---------- TELEGRAM FUNCTIONS ----------
@@ -468,9 +581,21 @@ status_placeholder = st.empty()
 
 log_entries = fetch_recent_logs()
 session_processed = 0
+last_update_id = clear_old_updates()
 
 while True:
     try:
+        # Process Telegram commands
+        updates = get_telegram_updates(last_update_id)
+        for update in updates:
+            last_update_id = update["update_id"]
+            msg = update.get("message", {})
+            chat_id = str(msg.get("chat", {}).get("id", ""))
+            text = msg.get("text", "")
+            if chat_id == TELEGRAM_CHAT_ID and text.startswith("/"):
+                handle_command(text)
+                log_entries.append(("command", datetime.now(PHT).strftime('%H:%M:%S'), f"Command: {text}"))
+
         now_pht = datetime.now(PHT)
         today_str = now_pht.date().isoformat()
         if now_pht.hour >= HEARTBEAT_HOUR and get_last_heartbeat_date() != today_str:
