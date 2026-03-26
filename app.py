@@ -324,14 +324,16 @@ def handle_command(text):
             if mode == "on":
                 update_site_setting("theme", "dark")
                 send_telegram_message("<b>Dark mode enabled.</b>")
-                save_log_entry("command", "Dark mode enabled via Telegram")
+                save_log_entry("command", "Dark mode enabled")
+                return "Dark mode enabled"
             else:
                 update_site_setting("theme", "light")
                 send_telegram_message("<b>Light mode enabled.</b>")
-                save_log_entry("command", "Light mode enabled via Telegram")
+                save_log_entry("command", "Light mode enabled")
+                return "Light mode enabled"
         else:
             send_telegram_message("Usage: /darkmode on|off")
-        return
+        return None
 
     if text.startswith("/announce"):
         rest = text[len("/announce"):].strip()
@@ -339,8 +341,8 @@ def handle_command(text):
         if not rest or rest.lower() == "off":
             update_site_setting("announce", {"active": False, "message": "", "type": "flash", "duration": 0})
             send_telegram_message("<b>Announcement cleared.</b>")
-            save_log_entry("command", "Announcement cleared via Telegram")
-            return
+            save_log_entry("command", "Announcement cleared")
+            return "Announcement cleared"
 
         # Parse: /announce <message> --flash 20s | --persist
         atype = "flash"
@@ -375,8 +377,9 @@ def handle_command(text):
             f"<b>Type:</b> {atype}\n"
             f"<b>Duration:</b> {duration_label}"
         )
-        save_log_entry("command", f"Announcement: {message}")
-        return
+        log_msg = f"Announcement: {message}"
+        save_log_entry("command", log_msg)
+        return log_msg
 
 
 # ---------- TELEGRAM FUNCTIONS ----------
@@ -595,8 +598,9 @@ while True:
             chat_id = str(msg.get("chat", {}).get("id", ""))
             text = msg.get("text", "")
             if chat_id == TELEGRAM_CHAT_ID and text.startswith("/"):
-                handle_command(text)
-                log_entries.append(("command", datetime.now(PHT).strftime('%H:%M:%S'), f"Command: {text}"))
+                log_msg = handle_command(text)
+                if log_msg:
+                    log_entries.append(("command", datetime.now(PHT).strftime('%H:%M:%S'), log_msg))
 
         now_pht = datetime.now(PHT)
         today_str = now_pht.date().isoformat()
