@@ -1,0 +1,29 @@
+name: Keep Streamlit Alive
+
+# Same pattern from revamp-payslip-automation
+# Empty commits prevent Streamlit Community Cloud from sleeping
+on:
+  schedule:
+    # Every 6 hours to keep it alive
+    - cron: '0 0,6,12,18 * * *'
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  keep-alive:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Push empty commit to keep Streamlit awake
+        run: |
+          git commit --allow-empty -m "chore: keep-alive commit [skip ci]"
+          git push
