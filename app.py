@@ -341,8 +341,7 @@ def handle_command(text):
         if not rest or rest.lower() == "off":
             update_site_setting("announce", {"active": False, "message": "", "type": "flash", "duration": 0})
             send_telegram_message("<b>Announcement cleared.</b>")
-            save_log_entry("command", "Announcement cleared")
-            return "Announcement cleared"
+            return None
 
         # Parse: /announce <message> --flash 20s | --persist
         atype = "flash"
@@ -377,9 +376,7 @@ def handle_command(text):
             f"<b>Type:</b> {atype}\n"
             f"<b>Duration:</b> {duration_label}"
         )
-        log_msg = f"Announcement: {message}"
-        save_log_entry("command", log_msg)
-        return log_msg
+        return None
 
 
 # ---------- TELEGRAM FUNCTIONS ----------
