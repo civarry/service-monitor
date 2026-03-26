@@ -98,7 +98,12 @@ def send_telegram_message(text):
 
 def format_notification(msg):
     """Format a message into a Telegram notification"""
-    timestamp = msg.get("created_at", "Unknown time")
+    raw_ts = msg.get("created_at", "")
+    try:
+        utc_dt = datetime.fromisoformat(raw_ts.replace("Z", "+00:00"))
+        timestamp = utc_dt.astimezone(PHT).strftime("%Y-%m-%d %I:%M %p PHT")
+    except (ValueError, AttributeError):
+        timestamp = raw_ts or "Unknown time"
     return (
         f"<b>New Contact Form Message</b>\n\n"
         f"<b>From:</b> {msg['name']}\n"
