@@ -227,6 +227,43 @@ def update_message_status(message_id, status):
         return False
 
 
+# ---------- ACTIVITY LOG FUNCTIONS ----------
+
+def save_log_entry(entry_type, message):
+    try:
+        requests.post(
+            f"{SUPABASE_URL}/rest/v1/activity_log",
+            headers=HEADERS,
+            json={"type": entry_type, "message": message},
+            timeout=10
+        )
+    except requests.RequestException:
+        pass
+
+
+def fetch_recent_logs(limit=30):
+    try:
+        response = requests.get(
+            f"{SUPABASE_URL}/rest/v1/activity_log",
+            headers=HEADERS,
+            params={"select": "type,message,created_at", "order": "created_at.desc", "limit": limit},
+            timeout=10
+        )
+        response.raise_for_status()
+        rows = response.json()
+        entries = []
+        for row in reversed(rows):
+            try:
+                utc_dt = datetime.fromisoformat(row["created_at"].replace("Z", "+00:00"))
+                ts = utc_dt.astimezone(PHT).strftime('%H:%M:%S')
+            except (ValueError, AttributeError):
+                ts = "??:??:??"
+            entries.append((row["type"], ts, row["message"]))
+        return entries
+    except requests.RequestException:
+        return []
+
+
 # ---------- TELEGRAM FUNCTIONS ----------
 
 def send_telegram_message(text):
@@ -429,7 +466,7 @@ status_placeholder = st.empty()
 
 # ---------- THE ACTUAL BACKEND LOOP ----------
 
-log_entries = []
+log_entries = fetch_recent_logs()
 session_processed = 0
 
 while True:
@@ -440,12 +477,15 @@ while True:
             send_heartbeat()
             set_last_heartbeat_date(today_str)
             log_entries.append(("heartbeat", now_pht.strftime('%H:%M:%S'), "Daily heartbeat sent"))
+            save_log_entry("heartbeat", "Daily heartbeat sent")
 
         count = process_pending_messages()
         session_processed += count
 
         if count > 0:
-            log_entries.append(("message", datetime.now(PHT).strftime('%H:%M:%S'), f"Processed {count} message(s)"))
+            log_msg = f"Processed {count} message(s)"
+            log_entries.append(("message", datetime.now(PHT).strftime('%H:%M:%S'), log_msg))
+            save_log_entry("message", log_msg)
 
         log_entries = log_entries[-30:]
 
