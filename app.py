@@ -1003,30 +1003,34 @@ def claim_pending_messages():
 def process_pending_messages():
     messages = claim_pending_messages()
     for msg in messages:
-        update_message_status(msg["id"], "ai_drafting")
-        draft = generate_reply_draft(
-            msg.get("name", ""),
-            msg.get("email", ""),
-            msg.get("message", "")
-        )
-        if draft:
-            save_reply(msg["id"], draft, "approved")
-
-        update_message_status(msg["id"], "notifying")
-        notification = format_notification(msg, draft=draft)
-        send_telegram_message(notification)
-
-        if draft and msg.get("email"):
-            update_message_status(msg["id"], "sending_reply")
-            email_sent = send_email_reply(
-                msg.get("email", ""),
+        try:
+            update_message_status(msg["id"], "ai_drafting")
+            draft = generate_reply_draft(
                 msg.get("name", ""),
-                draft,
+                msg.get("email", ""),
                 msg.get("message", "")
             )
-            update_message_status(msg["id"], "replied" if email_sent else "done")
-        else:
-            update_message_status(msg["id"], "done")
+            if draft:
+                save_reply(msg["id"], draft, "approved")
+
+            update_message_status(msg["id"], "notifying")
+            notification = format_notification(msg, draft=draft)
+            send_telegram_message(notification)
+
+            if draft and msg.get("email"):
+                update_message_status(msg["id"], "sending_reply")
+                email_sent = send_email_reply(
+                    msg.get("email", ""),
+                    msg.get("name", ""),
+                    draft,
+                    msg.get("message", "")
+                )
+                update_message_status(msg["id"], "replied" if email_sent else "done")
+            else:
+                update_message_status(msg["id"], "done")
+        except Exception as e:
+            update_message_status(msg["id"], "failed")
+            send_telegram_message(f"<b>Error processing msg #{msg.get('id', '?')}</b>\n\n{html.escape(str(e))}")
     return len(messages)
 
 
