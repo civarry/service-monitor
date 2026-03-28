@@ -311,8 +311,9 @@ def fetch_site_setting(key):
 def generate_reply_draft(name, email, message_text):
     try:
         prompt = (
-            f"You are replying to a contact form message on behalf of the site owner. "
-            f"Be professional, friendly, and concise (2-4 sentences).\n\n"
+            f"You are replying to a contact form message on behalf of CJ, a solo freelance developer. "
+            f"Write as 'I' not 'we' — CJ works alone. Keep it casual, friendly, and straight to the point. "
+            f"No corporate fluff. 2-4 sentences max. Don't use placeholder like '[Your Name]' — sign off as CJ.\n\n"
             f"From: {name} ({email})\n"
             f"Message: {message_text}\n\n"
             f"Write ONLY the reply text, nothing else."
