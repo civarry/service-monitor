@@ -733,11 +733,11 @@ def format_notification(msg, draft=None):
     if draft:
         msg_id = msg.get("id", "?")
         text += (
-            f"\n\n{'—' * 20}\n"
-            f"<b>AI Draft Reply:</b>\n{html.escape(draft)}\n\n"
+            f"\n\n<b>--- AI Draft Reply ---</b>\n"
+            f"{html.escape(draft)}\n\n"
             f"<i>Msg #{msg_id}</i>\n"
-            f"/approve — send this draft\n"
-            f"/edit <your reply> — replace draft"
+            f"/approve - send this draft\n"
+            f"/edit your reply here - replace draft"
         )
     return text
 
