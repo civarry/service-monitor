@@ -223,18 +223,15 @@ def fetch_pending_messages():
 
 
 def update_message_status(message_id, status):
-    try:
-        response = requests.patch(
-            f"{SUPABASE_URL}/rest/v1/messages",
-            headers=HEADERS,
-            params={"id": f"eq.{message_id}"},
-            json={"status": status, "processed_at": datetime.now(timezone.utc).isoformat()},
-            timeout=10
-        )
-        response.raise_for_status()
-        return True
-    except requests.RequestException:
-        return False
+    response = requests.patch(
+        f"{SUPABASE_URL}/rest/v1/messages",
+        headers=HEADERS,
+        params={"id": f"eq.{message_id}"},
+        json={"status": status, "processed_at": datetime.now(timezone.utc).isoformat()},
+        timeout=10
+    )
+    response.raise_for_status()
+    return True
 
 
 # ---------- ACTIVITY LOG FUNCTIONS ----------
@@ -974,29 +971,32 @@ def send_heartbeat():
 def claim_pending_messages():
     try:
         # Claim pending messages
+        now_utc = datetime.now(timezone.utc).isoformat()
         response = requests.patch(
             f"{SUPABASE_URL}/rest/v1/messages",
             headers={**HEADERS, "Prefer": "return=representation"},
             params={"status": "eq.pending"},
-            json={"status": "received", "processed_at": datetime.now(timezone.utc).isoformat()},
+            json={"status": "received", "processed_at": now_utc},
             timeout=10
         )
         response.raise_for_status()
         claimed = response.json()
 
-        # Also recover messages stuck at received/ai_drafting (app crashed mid-processing)
+        # Recover messages stuck at received/ai_drafting (app crashed mid-processing)
+        cutoff = (datetime.now(timezone.utc) - timedelta(minutes=2)).isoformat()
         response2 = requests.patch(
             f"{SUPABASE_URL}/rest/v1/messages",
             headers={**HEADERS, "Prefer": "return=representation"},
-            params={"status": "in.(received,ai_drafting)", "processed_at": f"lt.{(datetime.now(timezone.utc) - timedelta(minutes=2)).isoformat()}"},
-            json={"status": "received"},
+            params={"status": "in.(received,ai_drafting)", "processed_at": f"lt.{cutoff}"},
+            json={"status": "received", "processed_at": now_utc},
             timeout=10
         )
         response2.raise_for_status()
         recovered = response2.json()
 
         return claimed + recovered
-    except requests.RequestException:
+    except Exception as e:
+        send_telegram_message(f"<b>Claim error:</b>\n{html.escape(str(e))}")
         return []
 
 
@@ -1205,7 +1205,7 @@ while True:
             </div>
             """, unsafe_allow_html=True)
 
-    except Exception:
-        pass
+    except Exception as e:
+        send_telegram_message(f"<b>Main loop error:</b>\n{html.escape(str(e))}")
 
     time.sleep(POLL_INTERVAL)
