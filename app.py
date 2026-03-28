@@ -891,10 +891,11 @@ def format_notification(msg, draft=None):
     if draft:
         msg_id = msg.get("id", "?")
         text += (
-            f"\n\n<b>--- Auto-Replied ---</b>\n"
+            f"\n\n<b>--- AI Draft ---</b>\n"
             f"{html.escape(draft)}\n\n"
             f"<i>Msg #{msg_id}</i>\n"
-            f"/edit your correction - send follow-up email"
+            f"/approve — send this reply\n"
+            f"/edit your version — send custom reply"
         )
     return text
 
@@ -1014,23 +1015,13 @@ def process_pending_messages():
                 msg.get("message", "")
             )
             if draft:
-                save_reply(msg["id"], draft, "approved")
+                save_reply(msg["id"], draft, "draft")
 
             update_message_status(msg["id"], "notifying")
             notification = format_notification(msg, draft=draft)
             send_telegram_message(notification)
 
-            if draft and msg.get("email"):
-                update_message_status(msg["id"], "sending_reply")
-                email_sent = send_email_reply(
-                    msg.get("email", ""),
-                    msg.get("name", ""),
-                    draft,
-                    msg.get("message", "")
-                )
-                update_message_status(msg["id"], "replied" if email_sent else "done")
-            else:
-                update_message_status(msg["id"], "done")
+            update_message_status(msg["id"], "done")
         except Exception as e:
             detail = ""
             if hasattr(e, "response") and e.response is not None:
