@@ -973,6 +973,7 @@ def send_heartbeat():
 
 def claim_pending_messages():
     try:
+        # Claim pending messages
         response = requests.patch(
             f"{SUPABASE_URL}/rest/v1/messages",
             headers={**HEADERS, "Prefer": "return=representation"},
@@ -981,7 +982,20 @@ def claim_pending_messages():
             timeout=10
         )
         response.raise_for_status()
-        return response.json()
+        claimed = response.json()
+
+        # Also recover messages stuck at received/ai_drafting (app crashed mid-processing)
+        response2 = requests.patch(
+            f"{SUPABASE_URL}/rest/v1/messages",
+            headers={**HEADERS, "Prefer": "return=representation"},
+            params={"status": "in.(received,ai_drafting)", "processed_at": f"lt.{(datetime.now(timezone.utc) - timedelta(minutes=2)).isoformat()}"},
+            json={"status": "received"},
+            timeout=10
+        )
+        response2.raise_for_status()
+        recovered = response2.json()
+
+        return claimed + recovered
     except requests.RequestException:
         return []
 
