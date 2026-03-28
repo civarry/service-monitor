@@ -461,14 +461,46 @@ def fetch_all_draft_messages():
 
 def send_email_reply(to_email, to_name, reply_text, original_message):
     try:
-        subject = f"Re: Your message on civarry.github.io"
-        body = (
-            f"{reply_text}\n\n"
-            f"---\n"
-            f"In reply to your message:\n"
-            f"\"{original_message}\""
+        subject = "Re: Your message on civarry.github.io"
+        reply_paragraphs = "".join(
+            f'<p style="margin:0 0 12px 0;line-height:1.6;">{html.escape(p)}</p>'
+            for p in reply_text.strip().split("\n") if p.strip()
         )
-        msg = MIMEText(body, "plain")
+        body_html = f"""
+        <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:600px;margin:0 auto;color:#333;">
+            <div style="padding:32px 24px;">
+                <p style="margin:0 0 20px 0;line-height:1.6;">Hi {html.escape(to_name.split()[0] if to_name else '')},</p>
+                {reply_paragraphs}
+            </div>
+            <div style="border-top:1px solid #e5e7eb;padding:24px;margin-top:8px;">
+                <table cellpadding="0" cellspacing="0" border="0">
+                    <tr>
+                        <td style="padding-right:16px;vertical-align:top;">
+                            <div style="width:48px;height:48px;background:#111;border-radius:10px;display:flex;align-items:center;justify-content:center;">
+                                <span style="color:#fff;font-weight:700;font-size:18px;line-height:48px;text-align:center;display:block;width:48px;">CJ</span>
+                            </div>
+                        </td>
+                        <td style="vertical-align:top;">
+                            <p style="margin:0;font-weight:600;font-size:14px;color:#111;">CJ Carito</p>
+                            <p style="margin:2px 0 0 0;font-size:13px;color:#666;">Data Scientist &amp; Developer</p>
+                            <p style="margin:8px 0 0 0;font-size:12px;">
+                                <a href="https://civarry.github.io" style="color:#2563eb;text-decoration:none;">civarry.github.io</a>
+                                <span style="color:#ccc;margin:0 6px;">|</span>
+                                <a href="https://github.com/civarry" style="color:#2563eb;text-decoration:none;">GitHub</a>
+                                <span style="color:#ccc;margin:0 6px;">|</span>
+                                <a href="https://linkedin.com/in/cccarito" style="color:#2563eb;text-decoration:none;">LinkedIn</a>
+                            </p>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+            <div style="background:#f9fafb;border-top:1px solid #e5e7eb;padding:20px 24px;border-radius:0 0 8px 8px;">
+                <p style="margin:0 0 8px 0;font-size:12px;color:#999;text-transform:uppercase;letter-spacing:0.5px;">Your original message</p>
+                <p style="margin:0;font-size:13px;color:#666;line-height:1.5;font-style:italic;">{html.escape(original_message)}</p>
+            </div>
+        </div>
+        """
+        msg = MIMEText(body_html, "html")
         msg["Subject"] = subject
         msg["From"] = formataddr((SMTP_DISPLAY_NAME, SMTP_EMAIL))
         msg["To"] = formataddr((to_name, to_email))
