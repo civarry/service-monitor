@@ -356,7 +356,8 @@ RESPONSE RULES:
 - If unsure about something, say "let's discuss further" instead of guessing
 - Keep it casual, friendly, straight to the point
 - 2-4 sentences max
-- Sign off as CJ
+- Do NOT include a sign-off like "Best, CJ" or "CJ" — the email template already has a signature block
+- Start with a greeting like "Hi <name>," then go straight to the reply
 - No corporate fluff, no placeholder brackets
 """
 
@@ -469,7 +470,6 @@ def send_email_reply(to_email, to_name, reply_text, original_message):
         body_html = f"""
         <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:600px;margin:0 auto;color:#333;">
             <div style="padding:32px 24px;">
-                <p style="margin:0 0 20px 0;line-height:1.6;">Hi {html.escape(to_name.split()[0] if to_name else '')},</p>
                 {reply_paragraphs}
             </div>
             <div style="border-top:1px solid #e5e7eb;padding:24px;margin-top:8px;">
