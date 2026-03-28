@@ -1122,68 +1122,13 @@ st.markdown('</div>', unsafe_allow_html=True)
 # Status bar placeholder
 status_placeholder = st.empty()
 
-# ---------- THE ACTUAL BACKEND LOOP ----------
-
-# Ensure no webhook conflicts with getUpdates polling
-try:
-    requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/deleteWebhook", timeout=10)
-except requests.RequestException:
-    pass
-
-# Register Telegram bot command menu
-try:
-    requests.post(
-        f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setMyCommands",
-        json={"commands": [
-            {"command": "drafts", "description": "List all pending draft replies"},
-            {"command": "approve", "description": "Approve oldest draft reply"},
-            {"command": "edit", "description": "Replace draft — /edit [id] <text>"},
-            {"command": "update", "description": "Update content — /update bio|social|status"},
-            {"command": "add", "description": "Add content — /add project|skill"},
-            {"command": "remove", "description": "Remove content — /remove project|skill"},
-            {"command": "list", "description": "View content — /list projects|skills"},
-            {"command": "darkmode", "description": "Toggle theme — /darkmode on|off"},
-            {"command": "announce", "description": "Site banner — /announce <msg> --flash 20s"},
-        ]},
-        timeout=10
-    )
-except requests.RequestException:
-    pass
+# ---------- DASHBOARD REFRESH LOOP ----------
 
 log_entries = fetch_recent_logs()
-session_processed = 0
-last_update_id = clear_old_updates()
 
 while True:
     try:
-        # Process Telegram commands
-        updates = get_telegram_updates(last_update_id)
-        for update in updates:
-            last_update_id = update["update_id"]
-            msg = update.get("message", {})
-            chat_id = str(msg.get("chat", {}).get("id", ""))
-            text = msg.get("text", "")
-            if chat_id == TELEGRAM_CHAT_ID and text.startswith("/"):
-                log_msg = handle_command(text)
-                if log_msg:
-                    log_entries.append(("command", datetime.now(PHT).strftime('%H:%M:%S'), log_msg))
-
-        now_pht = datetime.now(PHT)
-        today_str = now_pht.date().isoformat()
-        if now_pht.hour >= HEARTBEAT_HOUR and get_last_heartbeat_date() != today_str:
-            send_heartbeat()
-            set_last_heartbeat_date(today_str)
-            log_entries.append(("heartbeat", now_pht.strftime('%H:%M:%S'), "Daily heartbeat sent"))
-            save_log_entry("heartbeat", "Daily heartbeat sent")
-
-        count = process_pending_messages()
-        session_processed += count
-
-        if count > 0:
-            log_msg = f"Processed {count} message(s)"
-            log_entries.append(("message", datetime.now(PHT).strftime('%H:%M:%S'), log_msg))
-            save_log_entry("message", log_msg)
-
+        log_entries = fetch_recent_logs()
         log_entries = log_entries[-30:]
 
         # Render activity log with styled HTML
@@ -1200,12 +1145,12 @@ while True:
         with status_placeholder.container():
             st.markdown(f"""
             <div class="status-bar">
-                <span>Last poll: {datetime.now(PHT).strftime('%Y-%m-%d %H:%M:%S')} PHT</span>
-                <span>Session: {session_processed} processed</span>
+                <span>Last refresh: {datetime.now(PHT).strftime('%Y-%m-%d %H:%M:%S')} PHT</span>
+                <span>Backend: Supabase Edge Functions</span>
             </div>
             """, unsafe_allow_html=True)
 
-    except Exception as e:
-        send_telegram_message(f"<b>Main loop error:</b>\n{html.escape(str(e))}")
+    except Exception:
+        pass
 
     time.sleep(POLL_INTERVAL)
