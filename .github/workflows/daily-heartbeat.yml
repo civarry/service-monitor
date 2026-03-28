@@ -1,0 +1,73 @@
+name: Daily Heartbeat
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # 8:00 AM PHT (UTC+8)
+  workflow_dispatch:
+
+jobs:
+  heartbeat:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Send heartbeat
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          # Get total message count
+          TOTAL=$(curl -s -D /tmp/headers -o /dev/null \
+            "${SUPABASE_URL}/rest/v1/messages?select=id&limit=0" \
+            -H "apikey: ${SUPABASE_SERVICE_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: count=exact" && \
+            grep -i 'content-range' /tmp/headers | sed 's/.*\///' | tr -d '\r\n' || echo "?")
+
+          # Get pending message count
+          PENDING=$(curl -s -D /tmp/headers -o /dev/null \
+            "${SUPABASE_URL}/rest/v1/messages?select=id&status=eq.pending&limit=0" \
+            -H "apikey: ${SUPABASE_SERVICE_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: count=exact" && \
+            grep -i 'content-range' /tmp/headers | sed 's/.*\///' | tr -d '\r\n' || echo "?")
+
+          NOW=$(TZ="Asia/Manila" date "+%Y-%m-%d %H:%M:%S PHT")
+          TODAY=$(TZ="Asia/Manila" date "+%Y-%m-%d")
+
+          # Send Telegram message
+          curl -s -X POST \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"chat_id\": \"${TELEGRAM_CHAT_ID}\",
+              \"text\": \"<b>Daily Status Report</b>\n\n<b>Status:</b> Online\n<b>Time:</b> ${NOW}\n<b>Total messages:</b> ${TOTAL}\n<b>Pending:</b> ${PENDING}\n\n<i>civarry.github.io is running.</i>\",
+              \"parse_mode\": \"HTML\"
+            }"
+
+          # Update last_heartbeat_date in app_state
+          curl -s -X POST \
+            "${SUPABASE_URL}/rest/v1/app_state" \
+            -H "apikey: ${SUPABASE_SERVICE_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: resolution=merge-duplicates,return=representation" \
+            -d "{
+              \"key\": \"last_heartbeat_date\",
+              \"value\": \"${TODAY}\",
+              \"updated_at\": \"$(date -u +%Y-%m-%dT%H:%M:%S+00:00)\"
+            }"
+
+          # Log to activity_log
+          curl -s -X POST \
+            "${SUPABASE_URL}/rest/v1/activity_log" \
+            -H "apikey: ${SUPABASE_SERVICE_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: return=representation" \
+            -d "{\"type\": \"heartbeat\", \"message\": \"Daily heartbeat sent\"}"
+
+          echo "Heartbeat sent successfully at ${NOW}"
