@@ -9,6 +9,9 @@ import requests
 import time
 import html
 import json
+import smtplib
+from email.mime.text import MIMEText
+from email.utils import formataddr
 from datetime import datetime, timezone, timedelta
 
 
@@ -20,6 +23,9 @@ TELEGRAM_BOT_TOKEN = st.secrets["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHAT_ID = st.secrets["TELEGRAM_CHAT_ID"]
 GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
 GROQ_MODEL = "llama-3.1-8b-instant"
+SMTP_EMAIL = st.secrets["SMTP_EMAIL"]
+SMTP_APP_PASSWORD = st.secrets["SMTP_APP_PASSWORD"]
+SMTP_DISPLAY_NAME = "CJ Carito"
 
 POLL_INTERVAL = 10
 PHT = timezone(timedelta(hours=8))
@@ -389,6 +395,27 @@ def fetch_latest_draft_message():
         return None
 
 
+def send_email_reply(to_email, to_name, reply_text, original_message):
+    try:
+        subject = f"Re: Your message on civarry.github.io"
+        body = (
+            f"{reply_text}\n\n"
+            f"---\n"
+            f"In reply to your message:\n"
+            f"\"{original_message}\""
+        )
+        msg = MIMEText(body, "plain")
+        msg["Subject"] = subject
+        msg["From"] = formataddr((SMTP_DISPLAY_NAME, SMTP_EMAIL))
+        msg["To"] = formataddr((to_name, to_email))
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(SMTP_EMAIL, SMTP_APP_PASSWORD)
+            server.send_message(msg)
+        return True
+    except Exception:
+        return False
+
+
 # ---------- TELEGRAM COMMAND HANDLING ----------
 
 def get_telegram_updates(last_id):
@@ -439,10 +466,18 @@ def handle_command(text):
             send_telegram_message("This message has already been replied to.")
             return None
         save_reply(msg_row["id"], msg_row["reply"], "approved")
+        email_sent = send_email_reply(
+            msg_row.get("email", ""),
+            msg_row.get("name", ""),
+            msg_row["reply"],
+            msg_row.get("message", "")
+        )
+        status = "sent" if email_sent else "saved (email failed)"
         send_telegram_message(
             f"<b>Reply approved for msg #{msg_row['id']}</b>\n\n"
-            f"<b>To:</b> {html.escape(msg_row.get('name', ''))}\n"
-            f"<b>Reply:</b> {html.escape(msg_row.get('reply', ''))}"
+            f"<b>To:</b> {html.escape(msg_row.get('name', ''))} ({html.escape(msg_row.get('email', ''))})\n"
+            f"<b>Reply:</b> {html.escape(msg_row.get('reply', ''))}\n"
+            f"<b>Email:</b> {status}"
         )
         return f"Approved reply for msg #{msg_row['id']}"
 
@@ -463,10 +498,18 @@ def handle_command(text):
             send_telegram_message("Usage: /edit <your reply> or /edit <id> <your reply>")
             return None
         save_reply(msg_row["id"], custom_reply, "edited")
+        email_sent = send_email_reply(
+            msg_row.get("email", ""),
+            msg_row.get("name", ""),
+            custom_reply,
+            msg_row.get("message", "")
+        )
+        status = "sent" if email_sent else "saved (email failed)"
         send_telegram_message(
             f"<b>Reply updated for msg #{msg_row['id']}</b>\n\n"
-            f"<b>To:</b> {html.escape(msg_row.get('name', ''))}\n"
-            f"<b>Reply:</b> {html.escape(custom_reply)}"
+            f"<b>To:</b> {html.escape(msg_row.get('name', ''))} ({html.escape(msg_row.get('email', ''))})\n"
+            f"<b>Reply:</b> {html.escape(custom_reply)}\n"
+            f"<b>Email:</b> {status}"
         )
         return f"Edited reply for msg #{msg_row['id']}"
 
