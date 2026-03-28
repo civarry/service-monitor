@@ -894,11 +894,10 @@ def format_notification(msg, draft=None):
     if draft:
         msg_id = msg.get("id", "?")
         text += (
-            f"\n\n<b>--- AI Draft Reply ---</b>\n"
+            f"\n\n<b>--- Auto-Replied ---</b>\n"
             f"{html.escape(draft)}\n\n"
             f"<i>Msg #{msg_id}</i>\n"
-            f"/approve - send this draft\n"
-            f"/edit your reply here - replace draft"
+            f"/edit your correction - send follow-up email"
         )
     return text
 
@@ -975,17 +974,32 @@ def send_heartbeat():
 def process_pending_messages():
     messages = fetch_pending_messages()
     for msg in messages:
-        update_message_status(msg["id"], "processing")
+        update_message_status(msg["id"], "received")
+
+        update_message_status(msg["id"], "ai_drafting")
         draft = generate_reply_draft(
             msg.get("name", ""),
             msg.get("email", ""),
             msg.get("message", "")
         )
         if draft:
-            save_reply(msg["id"], draft, "draft")
+            save_reply(msg["id"], draft, "approved")
+
+        update_message_status(msg["id"], "notifying")
         notification = format_notification(msg, draft=draft)
-        success = send_telegram_message(notification)
-        update_message_status(msg["id"], "done" if success else "failed")
+        send_telegram_message(notification)
+
+        if draft and msg.get("email"):
+            update_message_status(msg["id"], "sending_reply")
+            email_sent = send_email_reply(
+                msg.get("email", ""),
+                msg.get("name", ""),
+                draft,
+                msg.get("message", "")
+            )
+            update_message_status(msg["id"], "replied" if email_sent else "done")
+        else:
+            update_message_status(msg["id"], "done")
     return len(messages)
 
 
