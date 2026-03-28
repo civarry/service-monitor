@@ -996,7 +996,10 @@ def claim_pending_messages():
 
         return claimed + recovered
     except Exception as e:
-        send_telegram_message(f"<b>Claim error:</b>\n{html.escape(str(e))}")
+        detail = ""
+        if hasattr(e, "response") and e.response is not None:
+            detail = e.response.text
+        send_telegram_message(f"<b>Claim error:</b>\n{html.escape(str(e))}\n\n{html.escape(detail)}")
         return []
 
 
@@ -1029,8 +1032,14 @@ def process_pending_messages():
             else:
                 update_message_status(msg["id"], "done")
         except Exception as e:
-            update_message_status(msg["id"], "failed")
-            send_telegram_message(f"<b>Error processing msg #{msg.get('id', '?')}</b>\n\n{html.escape(str(e))}")
+            detail = ""
+            if hasattr(e, "response") and e.response is not None:
+                detail = e.response.text
+            try:
+                update_message_status(msg["id"], "failed")
+            except Exception:
+                pass
+            send_telegram_message(f"<b>Error msg #{msg.get('id', '?')}</b>\n\n{html.escape(str(e))}\n\n{html.escape(detail)}")
     return len(messages)
 
 
