@@ -971,11 +971,24 @@ def send_heartbeat():
 
 # ---------- PROCESS MESSAGES ----------
 
-def process_pending_messages():
-    messages = fetch_pending_messages()
-    for msg in messages:
-        update_message_status(msg["id"], "received")
+def claim_pending_messages():
+    try:
+        response = requests.patch(
+            f"{SUPABASE_URL}/rest/v1/messages",
+            headers={**HEADERS, "Prefer": "return=representation"},
+            params={"status": "eq.pending"},
+            json={"status": "received", "processed_at": datetime.now(timezone.utc).isoformat()},
+            timeout=10
+        )
+        response.raise_for_status()
+        return response.json()
+    except requests.RequestException:
+        return []
 
+
+def process_pending_messages():
+    messages = claim_pending_messages()
+    for msg in messages:
         update_message_status(msg["id"], "ai_drafting")
         draft = generate_reply_draft(
             msg.get("name", ""),
