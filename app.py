@@ -376,14 +376,14 @@ def fetch_message_by_id(message_id):
         return None
 
 
-def fetch_latest_draft_message():
+def fetch_oldest_draft_message():
     try:
         response = requests.get(
             f"{SUPABASE_URL}/rest/v1/messages",
             headers=HEADERS,
             params={
                 "reply_status": "eq.draft",
-                "order": "created_at.desc",
+                "order": "created_at.asc",
                 "limit": "1"
             },
             timeout=10
@@ -393,6 +393,24 @@ def fetch_latest_draft_message():
         return rows[0] if rows else None
     except requests.RequestException:
         return None
+
+
+def fetch_all_draft_messages():
+    try:
+        response = requests.get(
+            f"{SUPABASE_URL}/rest/v1/messages",
+            headers=HEADERS,
+            params={
+                "reply_status": "eq.draft",
+                "select": "id,name,email,message,created_at",
+                "order": "created_at.asc"
+            },
+            timeout=10
+        )
+        response.raise_for_status()
+        return response.json()
+    except requests.RequestException:
+        return []
 
 
 def send_email_reply(to_email, to_name, reply_text, original_message):
@@ -453,12 +471,28 @@ def clear_old_updates():
 def handle_command(text):
     text = text.strip()
 
+    if text.startswith("/drafts"):
+        drafts = fetch_all_draft_messages()
+        if not drafts:
+            send_telegram_message("No pending drafts.")
+            return None
+        lines = []
+        for i, d in enumerate(drafts, 1):
+            name = html.escape(d.get("name", ""))
+            msg_preview = html.escape(d.get("message", "")[:50])
+            lines.append(f"{i}. <b>{name}</b> — {msg_preview}...")
+        send_telegram_message(
+            f"<b>Pending drafts ({len(drafts)}):</b>\n\n" + "\n".join(lines) +
+            f"\n\n/approve — reply to #{1} (oldest)\n/approve <id> — reply to specific"
+        )
+        return None
+
     if text.startswith("/approve"):
         parts = text.split()
         if len(parts) >= 2 and parts[1].isdigit():
             msg_row = fetch_message_by_id(int(parts[1]))
         else:
-            msg_row = fetch_latest_draft_message()
+            msg_row = fetch_oldest_draft_message()
         if not msg_row:
             send_telegram_message("No draft reply found to approve.")
             return None
@@ -490,7 +524,7 @@ def handle_command(text):
             msg_row = fetch_message_by_id(int(parts[0]))
             custom_reply = parts[1] if len(parts) > 1 else ""
         else:
-            msg_row = fetch_latest_draft_message()
+            msg_row = fetch_oldest_draft_message()
         if not msg_row:
             send_telegram_message("No draft reply found to edit.")
             return None
@@ -973,7 +1007,8 @@ try:
     requests.post(
         f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setMyCommands",
         json={"commands": [
-            {"command": "approve", "description": "Approve AI draft reply"},
+            {"command": "drafts", "description": "List all pending draft replies"},
+            {"command": "approve", "description": "Approve oldest draft reply"},
             {"command": "edit", "description": "Replace draft — /edit [id] <text>"},
             {"command": "update", "description": "Update content — /update bio|social|status"},
             {"command": "add", "description": "Add content — /add project|skill"},
