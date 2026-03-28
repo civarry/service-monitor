@@ -463,16 +463,17 @@ def fetch_all_draft_messages():
 def send_email_reply(to_email, to_name, reply_text, original_message):
     try:
         subject = "Re: Your message on civarry.github.io"
+        now_str = datetime.now(PHT).strftime("%B %d, %Y at %I:%M %p PHT")
         reply_paragraphs = "".join(
             f'<p style="margin:0 0 12px 0;line-height:1.6;">{html.escape(p)}</p>'
             for p in reply_text.strip().split("\n") if p.strip()
         )
         body_html = f"""
-        <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:600px;margin:0 auto;color:#333;">
-            <div style="padding:32px 24px 16px 24px;">
+        <table cellpadding="0" cellspacing="0" border="0" width="100%" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:600px;margin:0 auto;color:#333;">
+            <tr><td style="padding:32px 24px 16px 24px;">
                 {reply_paragraphs}
-            </div>
-            <div style="padding:8px 24px 16px 24px;">
+            </td></tr>
+            <tr><td style="padding:8px 24px 0 24px;">
                 <table cellpadding="0" cellspacing="0" border="0">
                     <tr>
                         <td style="padding-right:16px;vertical-align:top;">
@@ -493,12 +494,14 @@ def send_email_reply(to_email, to_name, reply_text, original_message):
                         </td>
                     </tr>
                 </table>
-            </div>
-            <div style="background:#f9fafb;padding:20px 24px;margin:8px 24px 24px 24px;border-radius:8px;">
-                <p style="margin:0 0 8px 0;font-size:12px;color:#999;text-transform:uppercase;letter-spacing:0.5px;">Your original message</p>
-                <p style="margin:0;font-size:13px;color:#666;line-height:1.5;font-style:italic;">{html.escape(original_message)}</p>
-            </div>
-        </div>
+            </td></tr>
+            <tr><td style="padding:16px 24px 24px 24px;">
+                <div style="background:#f9fafb;padding:20px 24px;border-radius:8px;">
+                    <p style="margin:0 0 8px 0;font-size:12px;color:#999;text-transform:uppercase;letter-spacing:0.5px;">Your message on {now_str}</p>
+                    <p style="margin:0;font-size:13px;color:#666;line-height:1.5;font-style:italic;">{html.escape(original_message)}</p>
+                </div>
+            </td></tr>
+        </table>
         """
         msg = MIMEText(body_html, "html")
         msg["Subject"] = subject
