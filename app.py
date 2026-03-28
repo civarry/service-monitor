@@ -8,6 +8,7 @@ import streamlit as st
 import requests
 import time
 import html
+import json
 from datetime import datetime, timezone, timedelta
 
 
@@ -17,6 +18,8 @@ SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_SERVICE_KEY = st.secrets["SUPABASE_SERVICE_KEY"]
 TELEGRAM_BOT_TOKEN = st.secrets["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHAT_ID = st.secrets["TELEGRAM_CHAT_ID"]
+GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
+GROQ_MODEL = "llama-3.1-8b-instant"
 
 POLL_INTERVAL = 10
 PHT = timezone(timedelta(hours=8))
@@ -280,6 +283,111 @@ def update_site_setting(key, value):
         return False
 
 
+def fetch_site_setting(key):
+    try:
+        response = requests.get(
+            f"{SUPABASE_URL}/rest/v1/site_settings",
+            headers=HEADERS,
+            params={"key": f"eq.{key}", "select": "value"},
+            timeout=10
+        )
+        response.raise_for_status()
+        rows = response.json()
+        if not rows:
+            return None
+        val = rows[0]["value"]
+        if isinstance(val, str):
+            try:
+                return json.loads(val)
+            except json.JSONDecodeError:
+                return val
+        return val
+    except requests.RequestException:
+        return None
+
+
+# ---------- GROQ AI FUNCTIONS ----------
+
+def generate_reply_draft(name, email, message_text):
+    try:
+        prompt = (
+            f"You are replying to a contact form message on behalf of the site owner. "
+            f"Be professional, friendly, and concise (2-4 sentences).\n\n"
+            f"From: {name} ({email})\n"
+            f"Message: {message_text}\n\n"
+            f"Write ONLY the reply text, nothing else."
+        )
+        response = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": GROQ_MODEL,
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 200,
+                "temperature": 0.7
+            },
+            timeout=15
+        )
+        response.raise_for_status()
+        return response.json()["choices"][0]["message"]["content"].strip()
+    except (requests.RequestException, KeyError, IndexError):
+        return None
+
+
+# ---------- REPLY MANAGEMENT ----------
+
+def save_reply(message_id, reply_text, reply_status):
+    try:
+        response = requests.patch(
+            f"{SUPABASE_URL}/rest/v1/messages",
+            headers=HEADERS,
+            params={"id": f"eq.{message_id}"},
+            json={"reply": reply_text, "reply_status": reply_status},
+            timeout=10
+        )
+        response.raise_for_status()
+        return True
+    except requests.RequestException:
+        return False
+
+
+def fetch_message_by_id(message_id):
+    try:
+        response = requests.get(
+            f"{SUPABASE_URL}/rest/v1/messages",
+            headers=HEADERS,
+            params={"id": f"eq.{message_id}", "limit": "1"},
+            timeout=10
+        )
+        response.raise_for_status()
+        rows = response.json()
+        return rows[0] if rows else None
+    except requests.RequestException:
+        return None
+
+
+def fetch_latest_draft_message():
+    try:
+        response = requests.get(
+            f"{SUPABASE_URL}/rest/v1/messages",
+            headers=HEADERS,
+            params={
+                "reply_status": "eq.draft",
+                "order": "created_at.desc",
+                "limit": "1"
+            },
+            timeout=10
+        )
+        response.raise_for_status()
+        rows = response.json()
+        return rows[0] if rows else None
+    except requests.RequestException:
+        return None
+
+
 # ---------- TELEGRAM COMMAND HANDLING ----------
 
 def get_telegram_updates(last_id):
@@ -316,6 +424,217 @@ def clear_old_updates():
 
 def handle_command(text):
     text = text.strip()
+
+    if text.startswith("/approve"):
+        parts = text.split()
+        if len(parts) >= 2 and parts[1].isdigit():
+            msg_row = fetch_message_by_id(int(parts[1]))
+        else:
+            msg_row = fetch_latest_draft_message()
+        if not msg_row:
+            send_telegram_message("No draft reply found to approve.")
+            return None
+        if msg_row.get("reply_status") != "draft":
+            send_telegram_message("This message has already been replied to.")
+            return None
+        save_reply(msg_row["id"], msg_row["reply"], "approved")
+        send_telegram_message(
+            f"<b>Reply approved for msg #{msg_row['id']}</b>\n\n"
+            f"<b>To:</b> {html.escape(msg_row.get('name', ''))}\n"
+            f"<b>Reply:</b> {html.escape(msg_row.get('reply', ''))}"
+        )
+        return f"Approved reply for msg #{msg_row['id']}"
+
+    if text.startswith("/edit "):
+        rest = text[len("/edit "):].strip()
+        parts = rest.split(maxsplit=1)
+        msg_row = None
+        custom_reply = rest
+        if parts and parts[0].isdigit():
+            msg_row = fetch_message_by_id(int(parts[0]))
+            custom_reply = parts[1] if len(parts) > 1 else ""
+        else:
+            msg_row = fetch_latest_draft_message()
+        if not msg_row:
+            send_telegram_message("No draft reply found to edit.")
+            return None
+        if not custom_reply:
+            send_telegram_message("Usage: /edit <your reply> or /edit <id> <your reply>")
+            return None
+        save_reply(msg_row["id"], custom_reply, "edited")
+        send_telegram_message(
+            f"<b>Reply updated for msg #{msg_row['id']}</b>\n\n"
+            f"<b>To:</b> {html.escape(msg_row.get('name', ''))}\n"
+            f"<b>Reply:</b> {html.escape(custom_reply)}"
+        )
+        return f"Edited reply for msg #{msg_row['id']}"
+
+    if text.startswith("/update"):
+        rest = text[len("/update"):].strip()
+        parts = rest.split(maxsplit=1)
+        if not parts:
+            send_telegram_message(
+                "<b>Usage:</b>\n"
+                "/update bio <text>\n"
+                "/update social <platform> <url>\n"
+                "/update status <emoji> <text>\n"
+                "/update status off"
+            )
+            return None
+        subcommand = parts[0].lower()
+        value = parts[1] if len(parts) > 1 else ""
+
+        if subcommand == "bio":
+            if not value:
+                send_telegram_message("Usage: /update bio <your bio text>")
+                return None
+            update_site_setting("bio", {"text": value})
+            send_telegram_message(f"<b>Bio updated.</b>\n\n{html.escape(value)}")
+            return "Bio updated"
+
+        if subcommand == "social":
+            social_parts = value.split(maxsplit=1)
+            if len(social_parts) < 2:
+                send_telegram_message("Usage: /update social <platform> <url>")
+                return None
+            platform, url = social_parts
+            current = fetch_site_setting("social") or {}
+            current[platform.lower()] = url
+            update_site_setting("social", current)
+            send_telegram_message(f"<b>Social updated:</b> {html.escape(platform)} = {html.escape(url)}")
+            return f"Social updated: {platform}"
+
+        if subcommand == "status":
+            if not value or value.lower() == "off":
+                update_site_setting("status", {"active": False, "emoji": "", "text": ""})
+                send_telegram_message("<b>Status cleared.</b>")
+                return "Status cleared"
+            status_parts = value.split(maxsplit=1)
+            if len(status_parts) < 2:
+                send_telegram_message("Usage: /update status <emoji> <text> or /update status off")
+                return None
+            emoji, status_text = status_parts
+            update_site_setting("status", {"active": True, "emoji": emoji, "text": status_text})
+            send_telegram_message(f"<b>Status set:</b> {emoji} {html.escape(status_text)}")
+            return "Status updated"
+
+        send_telegram_message(f"Unknown: /update {html.escape(subcommand)}")
+        return None
+
+    if text.startswith("/add"):
+        rest = text[len("/add"):].strip()
+        parts = rest.split(maxsplit=1)
+        if not parts:
+            send_telegram_message(
+                "<b>Usage:</b>\n"
+                "/add project <title> | <description> | <url>\n"
+                "/add skill <skill name>"
+            )
+            return None
+        subcommand = parts[0].lower()
+        value = parts[1] if len(parts) > 1 else ""
+
+        if subcommand == "project":
+            segments = [s.strip() for s in value.split("|")]
+            if len(segments) < 2:
+                send_telegram_message("Usage: /add project <title> | <description> | <url>")
+                return None
+            title = segments[0]
+            description = segments[1]
+            url = segments[2] if len(segments) > 2 else ""
+            projects = fetch_site_setting("projects") or []
+            if not isinstance(projects, list):
+                projects = []
+            projects.append({"title": title, "description": description, "url": url})
+            update_site_setting("projects", projects)
+            send_telegram_message(
+                f"<b>Project added:</b> {html.escape(title)}\n"
+                f"<b>Description:</b> {html.escape(description)}\n"
+                f"<b>Total projects:</b> {len(projects)}"
+            )
+            return f"Project added: {title}"
+
+        if subcommand == "skill":
+            if not value:
+                send_telegram_message("Usage: /add skill <skill name>")
+                return None
+            skills = fetch_site_setting("skills") or []
+            if not isinstance(skills, list):
+                skills = []
+            skills.append(value)
+            update_site_setting("skills", skills)
+            send_telegram_message(f"<b>Skill added:</b> {html.escape(value)} (total: {len(skills)})")
+            return f"Skill added: {value}"
+
+        send_telegram_message(f"Unknown: /add {html.escape(subcommand)}")
+        return None
+
+    if text.startswith("/remove"):
+        rest = text[len("/remove"):].strip()
+        parts = rest.split(maxsplit=1)
+        if not parts:
+            send_telegram_message(
+                "<b>Usage:</b>\n"
+                "/remove project <title>\n"
+                "/remove skill <skill name>"
+            )
+            return None
+        subcommand = parts[0].lower()
+        value = parts[1] if len(parts) > 1 else ""
+
+        if subcommand == "project":
+            projects = fetch_site_setting("projects") or []
+            if not isinstance(projects, list):
+                projects = []
+            original_count = len(projects)
+            projects = [p for p in projects if p.get("title", "").lower() != value.lower()]
+            if len(projects) == original_count:
+                send_telegram_message(f"No project found: {html.escape(value)}")
+                return None
+            update_site_setting("projects", projects)
+            send_telegram_message(f"<b>Project removed:</b> {html.escape(value)} ({len(projects)} remaining)")
+            return f"Project removed: {value}"
+
+        if subcommand == "skill":
+            skills = fetch_site_setting("skills") or []
+            if not isinstance(skills, list):
+                skills = []
+            if value in skills:
+                skills.remove(value)
+                update_site_setting("skills", skills)
+                send_telegram_message(f"<b>Skill removed:</b> {html.escape(value)} ({len(skills)} remaining)")
+                return f"Skill removed: {value}"
+            send_telegram_message(f"Skill not found: {html.escape(value)}")
+            return None
+
+        send_telegram_message(f"Unknown: /remove {html.escape(subcommand)}")
+        return None
+
+    if text.startswith("/list"):
+        rest = text[len("/list"):].strip().lower()
+        if rest == "projects":
+            projects = fetch_site_setting("projects") or []
+            if not isinstance(projects, list):
+                projects = []
+            if not projects:
+                send_telegram_message("No projects found.")
+                return None
+            lines = []
+            for i, p in enumerate(projects, 1):
+                lines.append(f"{i}. <b>{html.escape(p.get('title', ''))}</b> - {html.escape(p.get('description', ''))}")
+            send_telegram_message("<b>Projects:</b>\n\n" + "\n".join(lines))
+            return None
+        if rest == "skills":
+            skills = fetch_site_setting("skills") or []
+            if not isinstance(skills, list):
+                skills = []
+            if not skills:
+                send_telegram_message("No skills found.")
+                return None
+            send_telegram_message("<b>Skills:</b>\n\n" + ", ".join(html.escape(s) for s in skills))
+            return None
+        send_telegram_message("Usage: /list projects | /list skills")
+        return None
 
     if text.startswith("/darkmode"):
         parts = text.split()
@@ -394,7 +713,7 @@ def send_telegram_message(text):
         return False
 
 
-def format_notification(msg):
+def format_notification(msg, draft=None):
     raw_ts = msg.get("created_at", "")
     try:
         utc_dt = datetime.fromisoformat(raw_ts.replace("Z", "+00:00"))
@@ -404,13 +723,23 @@ def format_notification(msg):
     name = html.escape(msg.get("name", ""))
     email = html.escape(msg.get("email", ""))
     message = html.escape(msg.get("message", ""))
-    return (
+    text = (
         f"<b>New Contact Form Message</b>\n\n"
         f"<b>From:</b> {name}\n"
         f"<b>Email:</b> {email}\n"
         f"<b>Message:</b>\n{message}\n\n"
         f"<i>Received: {timestamp}</i>"
     )
+    if draft:
+        msg_id = msg.get("id", "?")
+        text += (
+            f"\n\n{'—' * 20}\n"
+            f"<b>AI Draft Reply:</b>\n{html.escape(draft)}\n\n"
+            f"<i>Msg #{msg_id}</i>\n"
+            f"/approve — send this draft\n"
+            f"/edit <your reply> — replace draft"
+        )
+    return text
 
 
 # ---------- HEARTBEAT ----------
@@ -486,7 +815,14 @@ def process_pending_messages():
     messages = fetch_pending_messages()
     for msg in messages:
         update_message_status(msg["id"], "processing")
-        notification = format_notification(msg)
+        draft = generate_reply_draft(
+            msg.get("name", ""),
+            msg.get("email", ""),
+            msg.get("message", "")
+        )
+        if draft:
+            save_reply(msg["id"], draft, "draft")
+        notification = format_notification(msg, draft=draft)
         success = send_telegram_message(notification)
         update_message_status(msg["id"], "done" if success else "failed")
     return len(messages)
@@ -561,6 +897,7 @@ st.markdown(f"""
             <span class="service-badge">Supabase</span>
             <span class="service-badge">Telegram</span>
             <span class="service-badge">GitHub Pages</span>
+            <span class="service-badge">Groq AI</span>
         </div>
     </div>
 </div>
@@ -592,6 +929,12 @@ try:
     requests.post(
         f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setMyCommands",
         json={"commands": [
+            {"command": "approve", "description": "Approve AI draft reply"},
+            {"command": "edit", "description": "Replace draft — /edit [id] <text>"},
+            {"command": "update", "description": "Update content — /update bio|social|status"},
+            {"command": "add", "description": "Add content — /add project|skill"},
+            {"command": "remove", "description": "Remove content — /remove project|skill"},
+            {"command": "list", "description": "View content — /list projects|skills"},
             {"command": "darkmode", "description": "Toggle theme — /darkmode on|off"},
             {"command": "announce", "description": "Site banner — /announce <msg> --flash 20s"},
         ]},
