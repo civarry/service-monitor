@@ -226,12 +226,21 @@ async function sendTelegramMessage(text: string): Promise<boolean> {
 }
 
 interface MessageRecord {
-  id: number;
+  id: string;
   name?: string;
   email?: string;
   message?: string;
   status?: string;
   created_at?: string;
+}
+
+async function fetchPendingMessages(): Promise<MessageRecord[]> {
+  const url = new URL(`${SUPABASE_URL}/rest/v1/messages`);
+  url.searchParams.set("status", "eq.pending");
+  url.searchParams.set("order", "created_at.asc");
+  const res = await fetch(url.toString(), { headers: HEADERS });
+  if (!res.ok) return [];
+  return await res.json();
 }
 
 function formatNotification(msg: MessageRecord, draft?: string | null): string {
@@ -260,85 +269,89 @@ function formatNotification(msg: MessageRecord, draft?: string | null): string {
   return text;
 }
 
+// ---------- PROCESS A SINGLE MESSAGE ----------
+
+async function processMessage(record: MessageRecord): Promise<string> {
+  // Atomic claim: prevents duplicate processing
+  const claimed = await claimMessage(record.id);
+  if (claimed.length === 0) return "already_claimed";
+
+  // Generate AI draft
+  await updateMessageStatus(record.id, "ai_drafting");
+  const draft = await generateReplyDraft(
+    record.name || "",
+    record.email || "",
+    record.message || ""
+  );
+
+  if (draft) {
+    await saveReply(record.id, draft, "draft");
+  }
+
+  // Send Telegram notification
+  await updateMessageStatus(record.id, "notifying");
+  const notification = formatNotification(record, draft);
+  await sendTelegramMessage(notification);
+
+  // Mark as done
+  await updateMessageStatus(record.id, "done");
+  await saveLogEntry(
+    "message",
+    `Processed message from ${record.name || "unknown"}`
+  );
+
+  return "processed";
+}
+
 // ---------- MAIN HANDLER ----------
 
 Deno.serve(async (req) => {
-  try {
-    const payload = await req.json();
-
-    // Validate webhook payload
-    if (payload.type !== "INSERT" || payload.table !== "messages") {
-      return new Response(JSON.stringify({ skipped: true }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-
-    const record: MessageRecord = payload.record;
-
-    // Idempotency: only process pending messages
-    if (record.status !== "pending") {
-      return new Response(
-        JSON.stringify({ skipped: true, reason: "not pending" }),
-        { status: 200, headers: { "Content-Type": "application/json" } }
-      );
-    }
-
-    // Atomic claim: prevents duplicate processing
-    const claimed = await claimMessage(record.id);
-    if (claimed.length === 0) {
-      return new Response(
-        JSON.stringify({ skipped: true, reason: "already claimed" }),
-        { status: 200, headers: { "Content-Type": "application/json" } }
-      );
-    }
-
-    // Generate AI draft
-    await updateMessageStatus(record.id, "ai_drafting");
-    const draft = await generateReplyDraft(
-      record.name || "",
-      record.email || "",
-      record.message || ""
-    );
-
-    if (draft) {
-      await saveReply(record.id, draft, "draft");
-    }
-
-    // Send Telegram notification
-    await updateMessageStatus(record.id, "notifying");
-    const notification = formatNotification(record, draft);
-    await sendTelegramMessage(notification);
-
-    // Mark as done
-    await updateMessageStatus(record.id, "done");
-    await saveLogEntry(
-      "message",
-      `Processed message from ${record.name || "unknown"}`
-    );
-
-    return new Response(JSON.stringify({ success: true, id: record.id }), {
+  const OK = (body: Record<string, unknown>) =>
+    new Response(JSON.stringify(body), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
-  } catch (err) {
-    // Try to mark as failed and notify via Telegram
+
+  try {
+    let payload: Record<string, unknown> | null = null;
     try {
-      const payload = await req.clone().json().catch(() => null);
-      const id = payload?.record?.id;
-      if (id) await updateMessageStatus(id, "failed");
+      payload = await req.json();
     } catch {
-      // Best effort
+      // No body — treat as poll mode
     }
 
+    // Webhook mode: process a single record from the webhook payload
+    if (payload?.type === "INSERT" && payload?.table === "messages") {
+      const record = payload.record as MessageRecord;
+      if (record.status !== "pending") return OK({ skipped: true });
+      const result = await processMessage(record);
+      return OK({ success: true, id: record.id, result });
+    }
+
+    // Poll mode: fetch and process all pending messages
+    const pending = await fetchPendingMessages();
+    if (pending.length === 0) return OK({ poll: true, processed: 0 });
+
+    let processed = 0;
+    for (const msg of pending) {
+      try {
+        const result = await processMessage(msg);
+        if (result === "processed") processed++;
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        try { await updateMessageStatus(msg.id, "failed"); } catch { /* */ }
+        await sendTelegramMessage(
+          `<b>Error msg #${msg.id}:</b>\n${escapeHtml(errorMsg)}`
+        );
+      }
+    }
+
+    return OK({ poll: true, processed });
+  } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
     await sendTelegramMessage(
       `<b>Edge Function error:</b>\n${escapeHtml(errorMsg)}`
     );
-
-    return new Response(JSON.stringify({ error: errorMsg }), {
-      status: 200, // Return 200 to prevent webhook retries on handled errors
-      headers: { "Content-Type": "application/json" },
-    });
+    return OK({ error: errorMsg });
   }
 });
