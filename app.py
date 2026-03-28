@@ -356,8 +356,8 @@ RESPONSE RULES:
 - If unsure about something, say "let's discuss further" instead of guessing
 - Keep it casual, friendly, straight to the point
 - 2-4 sentences max
-- Do NOT include a sign-off like "Best, CJ" or "CJ" — the email template already has a signature block
-- Start with a greeting like "Hi <name>," then go straight to the reply
+- NEVER include a sign-off, closing, or name at the end (no "Best regards", "CJ", "Best,", "Christian Joy", "Data Scientist", etc.) — the email already has a signature block
+- Start with "Hi <first name>," then go straight to the reply — end with your last sentence, nothing after it
 - No corporate fluff, no placeholder brackets
 """
 
@@ -469,15 +469,15 @@ def send_email_reply(to_email, to_name, reply_text, original_message):
         )
         body_html = f"""
         <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:600px;margin:0 auto;color:#333;">
-            <div style="padding:32px 24px;">
+            <div style="padding:32px 24px 16px 24px;">
                 {reply_paragraphs}
             </div>
-            <div style="border-top:1px solid #e5e7eb;padding:24px;margin-top:8px;">
+            <div style="padding:8px 24px 16px 24px;">
                 <table cellpadding="0" cellspacing="0" border="0">
                     <tr>
                         <td style="padding-right:16px;vertical-align:top;">
-                            <div style="width:48px;height:48px;background:#111;border-radius:10px;display:flex;align-items:center;justify-content:center;">
-                                <span style="color:#fff;font-weight:700;font-size:18px;line-height:48px;text-align:center;display:block;width:48px;">CJ</span>
+                            <div style="width:48px;height:48px;background:#111;border-radius:10px;text-align:center;">
+                                <span style="color:#fff;font-weight:700;font-size:18px;line-height:48px;">CJ</span>
                             </div>
                         </td>
                         <td style="vertical-align:top;">
@@ -494,7 +494,7 @@ def send_email_reply(to_email, to_name, reply_text, original_message):
                     </tr>
                 </table>
             </div>
-            <div style="background:#f9fafb;border-top:1px solid #e5e7eb;padding:20px 24px;border-radius:0 0 8px 8px;">
+            <div style="background:#f9fafb;padding:20px 24px;margin:8px 24px 24px 24px;border-radius:8px;">
                 <p style="margin:0 0 8px 0;font-size:12px;color:#999;text-transform:uppercase;letter-spacing:0.5px;">Your original message</p>
                 <p style="margin:0;font-size:13px;color:#666;line-height:1.5;font-style:italic;">{html.escape(original_message)}</p>
             </div>
