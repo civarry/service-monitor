@@ -1,12 +1,10 @@
 name: Keep Streamlit Alive
 
-# Same pattern from revamp-payslip-automation
-# Empty commits prevent Streamlit Community Cloud from sleeping
 on:
   schedule:
     # Every 6 hours to keep it alive
     - cron: '0 0,6,12,18 * * *'
-  workflow_dispatch:  # Allow manual trigger
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -21,12 +19,77 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Fetch stats and generate AI summary
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: |
+          NOW=$(TZ="Asia/Manila" date "+%Y-%m-%d %H:%M:%S PHT")
+          TODAY=$(TZ="Asia/Manila" date "+%Y-%m-%d")
+
+          # Get total message count
+          TOTAL=$(curl -s -D /tmp/h1 -o /dev/null \
+            "${SUPABASE_URL}/rest/v1/messages?select=id&limit=0" \
+            -H "apikey: ${SUPABASE_SERVICE_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
+            -H "Prefer: count=exact" && \
+            grep -i 'content-range' /tmp/h1 | sed 's/.*\///' | tr -d '\r\n' || echo "0")
+
+          # Get pending message count
+          PENDING=$(curl -s -D /tmp/h2 -o /dev/null \
+            "${SUPABASE_URL}/rest/v1/messages?select=id&status=eq.pending&limit=0" \
+            -H "apikey: ${SUPABASE_SERVICE_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
+            -H "Prefer: count=exact" && \
+            grep -i 'content-range' /tmp/h2 | sed 's/.*\///' | tr -d '\r\n' || echo "0")
+
+          # Get recent activity logs
+          LOGS=$(curl -s \
+            "${SUPABASE_URL}/rest/v1/activity_log?select=type,message,created_at&order=created_at.desc&limit=5" \
+            -H "apikey: ${SUPABASE_SERVICE_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
+            -H "Content-Type: application/json")
+
+          # Ask Groq to generate a brief status summary
+          PROMPT="You are a concise system monitor. Given these stats for a contact form service, write a 1-2 sentence status summary. Be natural and brief.\n\nDate: ${TODAY}\nTotal messages: ${TOTAL}\nPending messages: ${PENDING}\nRecent activity: ${LOGS}\n\nRespond with ONLY the summary text, nothing else."
+
+          SUMMARY=$(curl -s "https://api.groq.com/openai/v1/chat/completions" \
+            -H "Authorization: Bearer ${GROQ_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n \
+              --arg prompt "$PROMPT" \
+              '{
+                "model": "llama-3.1-8b-instant",
+                "messages": [{"role": "user", "content": $prompt}],
+                "max_tokens": 100,
+                "temperature": 0.7
+              }')" | jq -r '.choices[0].message.content // "System operational."')
+
+          # Write status.json
+          jq -n \
+            --arg timestamp "$NOW" \
+            --arg date "$TODAY" \
+            --arg total "$TOTAL" \
+            --arg pending "$PENDING" \
+            --arg summary "$SUMMARY" \
+            '{
+              last_updated: $timestamp,
+              date: $date,
+              messages: { total: ($total | tonumber? // 0), pending: ($pending | tonumber? // 0) },
+              ai_summary: $summary
+            }' > status.json
+
+          echo "Summary: ${SUMMARY}"
+
       - name: Configure Git
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Push empty commit to keep Streamlit awake
+      - name: Commit and push status update
         run: |
-          git commit --allow-empty -m "chore: keep-alive commit [skip ci]"
+          git add status.json
+          SUMMARY=$(jq -r '.ai_summary' status.json | head -c 72)
+          git commit -m "status: ${SUMMARY}" || git commit --allow-empty -m "chore: keep-alive [skip ci]"
           git push
