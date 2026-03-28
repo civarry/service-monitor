@@ -8,6 +8,7 @@ const TELEGRAM_BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN")!;
 const TELEGRAM_CHAT_ID = Deno.env.get("TELEGRAM_CHAT_ID")!;
 const SMTP_EMAIL = Deno.env.get("SMTP_EMAIL")!;
 const SMTP_APP_PASSWORD = Deno.env.get("SMTP_APP_PASSWORD")!;
+const TELEGRAM_WEBHOOK_SECRET = Deno.env.get("TELEGRAM_WEBHOOK_SECRET")!;
 
 const HEADERS: Record<string, string> = {
   apikey: SUPABASE_SERVICE_KEY,
@@ -709,6 +710,12 @@ async function handleAnnounce(args: string): Promise<void> {
 // ---------- MAIN HANDLER ----------
 
 Deno.serve(async (req) => {
+  // Verify request is from Telegram
+  const secret = req.headers.get("x-telegram-bot-api-secret-token");
+  if (secret !== TELEGRAM_WEBHOOK_SECRET) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+
   try {
     const update = await req.json();
 
