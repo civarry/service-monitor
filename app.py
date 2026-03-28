@@ -359,6 +359,8 @@ RESPONSE RULES:
 - NEVER include a sign-off, closing, or name at the end (no "Best regards", "CJ", "Best,", "Christian Joy", "Data Scientist", etc.) — the email already has a signature block
 - Start with "Hi <first name>," then go straight to the reply — end with your last sentence, nothing after it
 - No corporate fluff, no placeholder brackets
+- ONLY address what the sender asked — do NOT add extra offers, suggestions, or filler like "check out my GitHub" or "let me know if you have questions"
+- Keep it tight — answer their question, suggest next step if needed, done
 """
 
 def generate_reply_draft(name, email, message_text):
