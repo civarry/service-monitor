@@ -130,7 +130,7 @@ async function saveLogEntry(
 // ---------- MESSAGE HELPERS ----------
 
 interface MessageRow {
-  id: number;
+  id: string;
   name?: string;
   email?: string;
   message?: string;
@@ -139,7 +139,7 @@ interface MessageRow {
   created_at?: string;
 }
 
-async function fetchMessageById(id: number): Promise<MessageRow | null> {
+async function fetchMessageById(id: string): Promise<MessageRow | null> {
   const rows = (await supabaseGet("messages", {
     id: `eq.${id}`,
     limit: "1",
@@ -165,7 +165,7 @@ async function fetchAllDrafts(): Promise<MessageRow[]> {
 }
 
 async function saveReply(
-  id: number,
+  id: string,
   replyText: string,
   replyStatus: string
 ): Promise<void> {
@@ -345,18 +345,21 @@ async function handleDrafts(): Promise<void> {
     const preview = escapeHtml((d.message || "").slice(0, 50));
     return `${i + 1}. <b>${name}</b> — ${preview}...`;
   });
+  const approveLinks = drafts
+    .map((d) => `/approve_${(d.id || "").replace(/-/g, "")}`)
+    .join("\n");
   await sendTelegram(
     `<b>Pending drafts (${drafts.length}):</b>\n\n` +
       lines.join("\n") +
-      `\n\n/approve — reply to #1 (oldest)\n/approve <id> — reply to specific`
+      `\n\n<b>Quick approve:</b>\n${approveLinks}`
   );
 }
 
 async function handleApprove(args: string): Promise<string | null> {
   const parts = args.trim().split(/\s+/);
   let msgRow: MessageRow | null;
-  if (parts[0] && /^\d+$/.test(parts[0])) {
-    msgRow = await fetchMessageById(parseInt(parts[0]));
+  if (parts[0] && /^[0-9a-f-]+$/i.test(parts[0])) {
+    msgRow = await fetchMessageById(parts[0]);
   } else {
     msgRow = await fetchOldestDraft();
   }
@@ -391,8 +394,8 @@ async function handleEdit(args: string): Promise<string | null> {
   let msgRow: MessageRow | null;
   let customReply = rest;
 
-  if (parts[0] && /^\d+$/.test(parts[0])) {
-    msgRow = await fetchMessageById(parseInt(parts[0]));
+  if (parts[0] && /^[0-9a-f-]+$/i.test(parts[0])) {
+    msgRow = await fetchMessageById(parts[0]);
     customReply = parts.slice(1).join(" ");
   } else {
     msgRow = await fetchOldestDraft();
@@ -737,15 +740,34 @@ Deno.serve(async (req) => {
 
     let logMsg: string | null = null;
 
-    switch (command) {
+    // Handle /approve_<id> and /edit_<id> commands
+    // IDs are dash-less UUIDs — restore dashes for DB lookup
+    function restoreUUID(hex: string): string {
+      if (hex.length === 32) {
+        return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+      }
+      return hex;
+    }
+
+    let resolvedCommand = command;
+    let resolvedArgs = args;
+    if (command.startsWith("/approve_")) {
+      resolvedCommand = "/approve";
+      resolvedArgs = restoreUUID(command.slice("/approve_".length)) + (args ? " " + args : "");
+    } else if (command.startsWith("/edit_")) {
+      resolvedCommand = "/edit";
+      resolvedArgs = restoreUUID(command.slice("/edit_".length)) + (args ? " " + args : "");
+    }
+
+    switch (resolvedCommand) {
       case "/drafts":
         await handleDrafts();
         break;
       case "/approve":
-        logMsg = await handleApprove(args);
+        logMsg = await handleApprove(resolvedArgs);
         break;
       case "/edit":
-        logMsg = await handleEdit(args);
+        logMsg = await handleEdit(resolvedArgs);
         break;
       case "/update":
         logMsg = await handleUpdate(args);
@@ -766,7 +788,7 @@ Deno.serve(async (req) => {
         await handleAnnounce(args);
         break;
       default:
-        await sendTelegram(`Unknown command: ${escapeHtml(command)}`);
+        await sendTelegram(`Unknown command: ${escapeHtml(resolvedCommand)}`);
     }
 
     if (logMsg) {
