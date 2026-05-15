@@ -661,6 +661,35 @@ async function handleDarkmode(args: string): Promise<string | null> {
   return null;
 }
 
+async function handleBrief(): Promise<string | null> {
+  await sendTelegram("⏳ Generating briefing…");
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/functions/v1/daily-briefing`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ force: true }),
+      }
+    );
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+      await sendTelegram(
+        `<b>Brief failed:</b> ${res.status}\n${escapeHtml(JSON.stringify(data ?? {}))}`
+      );
+      return null;
+    }
+    return `Brief on-demand: ${data?.article_count ?? 0} articles`;
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    await sendTelegram(`<b>Brief error:</b> ${escapeHtml(errorMsg)}`);
+    return null;
+  }
+}
+
 async function handleAnnounce(args: string): Promise<void> {
   const rest = args.trim();
 
@@ -786,6 +815,10 @@ Deno.serve(async (req) => {
         break;
       case "/announce":
         await handleAnnounce(args);
+        break;
+      case "/brief":
+      case "/news":
+        logMsg = await handleBrief();
         break;
       default:
         await sendTelegram(`Unknown command: ${escapeHtml(resolvedCommand)}`);
