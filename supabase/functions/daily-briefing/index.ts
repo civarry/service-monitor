@@ -10,7 +10,7 @@ import {
   ArticleRow,
   ArticleWithId,
 } from "./lib/db.ts";
-import { summarizeCategory } from "./lib/groq.ts";
+import { digestCategory, CategoryDigest } from "./lib/groq.ts";
 import { sendTelegram, escapeHtml } from "./lib/telegram.ts";
 
 function taipeiDate(): string {
@@ -97,24 +97,35 @@ function pickTop(rows: ArticleWithId[], category: string, n: number): ArticleWit
   return rows.filter((r) => r.category === category).slice(0, n);
 }
 
-function headlineLinks(items: ArticleWithId[]): string {
-  if (items.length === 0) return "  (no items)";
+function headlineLinks(items: ArticleWithId[], labels: string[]): string {
   return items
-    .map((it) => `• <a href="${escapeHtml(it.url)}">${escapeHtml(it.title)}</a>`)
+    .map((it, i) => {
+      const text = (labels[i] && labels[i].trim()) || it.title;
+      return `• <a href="${escapeHtml(it.url)}">${escapeHtml(text)}</a>`;
+    })
     .join("\n");
 }
 
 function formatWeather(w: Weather | null): string {
   if (!w) return "🌤 Weather unavailable";
-  const rainNote = w.precip_prob >= 60 ? " · ☔ bring an umbrella" : "";
-  return `🌤 <b>${escapeHtml(w.summary)}</b> · ${Math.round(w.temp_min)}–${Math.round(w.temp_max)}°C · Rain ${w.precip_prob}%${rainNote}`;
+  const wxEmoji =
+    w.precip_prob >= 70 ? "🌧" : w.precip_prob >= 40 ? "🌦" : w.code >= 1 && w.code <= 3 ? "⛅" : "☀️";
+  const rainEmoji = w.precip_prob >= 40 ? "☔" : "💧";
+  const tail = w.precip_prob >= 60 ? " · bring an umbrella" : "";
+  return [
+    `${wxEmoji} <b>${escapeHtml(w.summary)}</b> · ${Math.round(w.temp_min)}–${Math.round(w.temp_max)}°C`,
+    `${rainEmoji} ${escapeHtml(w.rain_window)}${tail}`,
+  ].join("\n");
 }
 
-function section(emoji: string, label: string, summary: string | null, items: ArticleWithId[]): string {
-  const header = `${emoji} <b>${label}</b> (${items.length})`;
-  if (items.length === 0) return `${header}\n  (no items)`;
-  const summaryLine = summary ? `<i>${escapeHtml(summary)}</i>\n` : "";
-  return `${header}\n${summaryLine}${headlineLinks(items)}`;
+function section(emoji: string, label: string, digest: CategoryDigest, items: ArticleWithId[]): string {
+  const header = `${emoji} <b>${label}</b>`;
+  if (items.length === 0) return `${header}\n<i>(no items today)</i>`;
+  const summaryBlock = digest.summary ? `<blockquote>${escapeHtml(digest.summary)}</blockquote>` : "";
+  const parts = [header];
+  if (summaryBlock) parts.push(summaryBlock);
+  parts.push(headlineLinks(items, digest.labels));
+  return parts.join("\n");
 }
 
 async function composeDigest(
@@ -125,10 +136,10 @@ async function composeDigest(
   const ph = pickTop(rows, "ph-news", 5);
   const twPh = pickTop(rows, "tw-ph", 5);
 
-  const [twSummary, phSummary, twPhSummary] = await Promise.all([
-    summarizeCategory("Taiwan", tw),
-    summarizeCategory("Philippines", ph),
-    summarizeCategory("Taiwan and Philippines relations / overseas Filipino", twPh),
+  const [twDigest, phDigest, twPhDigest] = await Promise.all([
+    digestCategory("Taiwan", tw),
+    digestCategory("Philippines", ph),
+    digestCategory("Taiwan and Philippines relations / overseas Filipino", twPh),
   ]);
 
   return [
@@ -137,11 +148,11 @@ async function composeDigest(
     ``,
     formatWeather(weather),
     ``,
-    section("🇹🇼", "Taiwan", twSummary, tw),
+    section("🇹🇼", "Taiwan", twDigest, tw),
     ``,
-    section("🇵🇭", "Philippines", phSummary, ph),
+    section("🇵🇭", "Philippines", phDigest, ph),
     ``,
-    section("🤝", "Taiwan ↔ Philippines", twPhSummary, twPh),
+    section("🤝", "Taiwan ↔ Philippines", twPhDigest, twPh),
   ].join("\n");
 }
 

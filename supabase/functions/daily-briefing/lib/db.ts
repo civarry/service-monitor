@@ -25,11 +25,14 @@ export interface ArticleWithId extends ArticleRow {
 
 export async function upsertArticles(rows: ArticleRow[]): Promise<void> {
   if (rows.length === 0) return;
+  // merge-duplicates so an article reappearing in today's feed has its
+  // briefing_date refreshed to today; embedding/cluster_id columns are
+  // not in the payload so they remain untouched.
   const res = await fetch(
     `${SUPABASE_URL}/rest/v1/articles?on_conflict=url`,
     {
       method: "POST",
-      headers: { ...HEADERS, Prefer: "resolution=ignore-duplicates" },
+      headers: { ...HEADERS, Prefer: "resolution=merge-duplicates" },
       body: JSON.stringify(rows),
     }
   );
