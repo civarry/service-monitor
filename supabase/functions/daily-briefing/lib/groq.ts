@@ -9,6 +9,10 @@ const MIN_ARTICLES_FOR_SUMMARY = 3;
 export interface SummarizableArticle {
   title: string;
   description?: string;
+  // When this article represents a cluster of multi-source coverage of the
+  // same event, additional_coverage carries the OTHER outlets' descriptions
+  // so the LLM can synthesize across them.
+  additional_coverage?: Array<{ source: string; description?: string }>;
 }
 
 export interface CategoryDigest {
@@ -18,10 +22,19 @@ export interface CategoryDigest {
 
 function bulletList(articles: SummarizableArticle[]): string {
   return articles
-    .map(
-      (a, i) =>
-        `${i + 1}. ${a.title}${a.description ? "\n   " + a.description.slice(0, 400) : ""}`
-    )
+    .map((a, i) => {
+      const head = `${i + 1}. ${a.title}`;
+      const ownDesc = a.description ? `\n   ${a.description.slice(0, 400)}` : "";
+      const extra = (a.additional_coverage || [])
+        .filter((c) => c.description && c.description.trim())
+        .map((c) => `\n   [Also covered by ${c.source}]: ${c.description!.slice(0, 300)}`)
+        .join("");
+      const coverageNote =
+        a.additional_coverage && a.additional_coverage.length > 0
+          ? `\n   (covered by ${a.additional_coverage.length + 1} outlets total)`
+          : "";
+      return head + ownDesc + extra + coverageNote;
+    })
     .join("\n");
 }
 
@@ -81,15 +94,22 @@ async function writeSummary(
   articles: SummarizableArticle[]
 ): Promise<string | null> {
   const bullets = bulletList(articles);
+  const hasMultiSource = articles.some(
+    (a) => (a.additional_coverage?.length || 0) > 0
+  );
+
+  const multiSourceNote = hasMultiSource
+    ? `\n\nSome stories below are covered by multiple outlets — the "[Also covered by SOURCE]" lines give you additional facts from those outlets about the same event. Synthesize across them when writing the summary. Prefer concrete details from any cluster member over generic phrasing.`
+    : "";
 
   const prompt =
     `You are a senior journalist writing the 7 AM ${label} section of a Taipei reader's morning briefing.\n\n` +
-    `Headlines (numbered; description follows where available):\n${bullets}\n\n` +
+    `Headlines (numbered; description and any cross-outlet coverage follow):\n${bullets}${multiSourceNote}\n\n` +
     `Write a fact-dense 3-sentence summary (roughly 70-90 words total).\n\n` +
     `LEAD SELECTION — open with the SINGLE most consequential story. Use this ranking:\n` +
     `  HIGH consequence: natural disasters in progress (eruptions, typhoons, earthquakes), deaths affecting many, large financial figures (NT$/PHP billions), national-security or military actions, named government officials acting on policy, large-scale protests, public-health events.\n` +
     `  LOW consequence: local crime, individual missing-persons (unless tied to a broader event), festivals, soft features, board appointments, individual scholarships, weather absent disaster.\n` +
-    `If multiple HIGH items exist, prefer the one with the most concrete numeric/named detail in its description.\n\n` +
+    `If multiple HIGH items exist, prefer the one with the most concrete numeric/named detail in its description. Stories covered by multiple outlets are a soft signal of importance — break ties in their favor.\n\n` +
     `Return ONLY valid JSON, no markdown:\n` +
     `{ "summary": "..." }\n\n` +
     `Hard rules:\n` +

@@ -132,7 +132,6 @@ function jaccard(a: Set<string>, b: Set<string>): number {
 }
 
 // Cosine similarity for two same-length numeric vectors.
-// 512-d voyage-3-lite × ~5 kept items ≈ 2.5K ops per article — trivial CPU.
 function cosine(a: number[], b: number[]): number {
   if (a.length !== b.length || a.length === 0) return 0;
   let dot = 0, na = 0, nb = 0;
@@ -145,34 +144,80 @@ function cosine(a: number[], b: number[]): number {
   return dot / (Math.sqrt(na) * Math.sqrt(nb));
 }
 
-// Drop syndication + semantic duplicates. Prefer cosine similarity on
-// embeddings when both items have them (catches semantic near-duplicates
-// like "PMA Graduation Address" vs "PMA Graduation Speech" even when token
-// overlap is low). Fall back to Jaccard on title tokens when either side
-// lacks an embedding (new articles not yet processed by embed-articles, or
-// a Voyage outage). The briefing therefore never breaks on embedding state.
-const SEMANTIC_THRESHOLD = 0.85;
-const JACCARD_THRESHOLD = 0.4;
+// Clustering: group articles about the same event across sources. The
+// briefing then picks top clusters by SIZE (most-covered story), not top
+// articles by recency — surfaces what everyone is actually talking about.
+//
+// Threshold tuned looser than dedupe (0.85): catches genuine same-event
+// coverage with different angles, not just verbatim syndication. Members
+// of a cluster are passed to the LLM as additional_coverage so the prompt
+// can synthesize across outlets.
+//
+// Fallback to Jaccard for articles missing embeddings (Voyage outage or
+// not-yet-processed) — briefing never breaks on embedding state.
+const CLUSTER_COSINE_THRESHOLD = 0.80;
+const CLUSTER_JACCARD_THRESHOLD = 0.4;
 
-function dedupeNearDuplicates(items: ArticleWithId[]): ArticleWithId[] {
-  const kept: { item: ArticleWithId; tokens: Set<string> }[] = [];
-  for (const item of items) {
-    const tokens = titleTokens(item.title);
-    const isDupe = kept.some((k) => {
-      if (item.embedding && k.item.embedding) {
-        return cosine(item.embedding, k.item.embedding) >= SEMANTIC_THRESHOLD;
-      }
-      return jaccard(tokens, k.tokens) >= JACCARD_THRESHOLD;
-    });
-    if (!isDupe) kept.push({ item, tokens });
-  }
-  return kept.map((k) => k.item);
+interface Cluster {
+  rep: ArticleWithId;             // representative (most-recent member)
+  members: ArticleWithId[];       // all members including rep
 }
 
-function pickTop(rows: ArticleWithId[], category: string, n: number): ArticleWithId[] {
+function clusterArticles(articles: ArticleWithId[]): Cluster[] {
+  const clusters: Cluster[] = [];
+  const repTokens = new Map<ArticleWithId, Set<string>>();
+
+  for (const article of articles) {
+    const itemTokens = titleTokens(article.title);
+    let placed = false;
+
+    for (const cluster of clusters) {
+      const rep = cluster.rep;
+      const cosScore =
+        article.embedding && rep.embedding
+          ? cosine(article.embedding, rep.embedding)
+          : -1;
+      const usedCosine = cosScore >= 0;
+      const matches = usedCosine
+        ? cosScore >= CLUSTER_COSINE_THRESHOLD
+        : jaccard(itemTokens, repTokens.get(rep)!) >= CLUSTER_JACCARD_THRESHOLD;
+
+      if (matches) {
+        cluster.members.push(article);
+        placed = true;
+        break;
+      }
+    }
+
+    if (!placed) {
+      clusters.push({ rep: article, members: [article] });
+      repTokens.set(article, itemTokens);
+    }
+  }
+
+  // Sort: bigger clusters first (most-covered = most important by social
+  // signal). Tiebreak by representative's recency, then by description
+  // length (richer detail = better headline).
+  clusters.sort((a, b) => {
+    if (b.members.length !== a.members.length) {
+      return b.members.length - a.members.length;
+    }
+    const pa = a.rep.published_at || "";
+    const pb = b.rep.published_at || "";
+    if (pa !== pb) return pb.localeCompare(pa);
+    return (b.rep.description?.length || 0) - (a.rep.description?.length || 0);
+  });
+
+  return clusters;
+}
+
+function pickTopClusters(
+  rows: ArticleWithId[],
+  category: string,
+  n: number
+): Cluster[] {
   const inCategory = rows.filter((r) => r.category === category);
-  const deduped = dedupeNearDuplicates(inCategory);
-  return deduped.slice(0, n);
+  return clusterArticles(inCategory).slice(0, n);
 }
 
 function headlineLinks(items: ArticleWithId[], labels: string[]): string {
@@ -206,26 +251,43 @@ function section(emoji: string, label: string, digest: CategoryDigest, items: Ar
   return parts.join("\n");
 }
 
-// Below this, the TW↔PH section is hidden entirely (header + bullet alone
-// looks lonely). A single cross-cutting article better belongs as a footnote;
-// for now we just suppress it until the day actually has cross-coverage.
-const TW_PH_MIN_ITEMS = 2;
+// Below this, the TW↔PH section is hidden entirely (header + lonely bullet
+// looks broken). Counted in distinct clusters, not articles — five articles
+// of the same Marcos-OFW story would cluster to 1 and still be sparse.
+const TW_PH_MIN_CLUSTERS = 2;
+
+// Convert a Cluster into the shape digestCategory expects, attaching other
+// outlets' descriptions as additional_coverage so the LLM can synthesize.
+function clusterForDigest(c: Cluster) {
+  const others = c.members.slice(1); // drop the rep itself
+  return {
+    title: c.rep.title,
+    description: c.rep.description,
+    additional_coverage: others.map((m) => ({
+      source: m.source,
+      description: m.description,
+    })),
+  };
+}
 
 async function composeDigest(
   weather: Weather | null,
   rows: ArticleWithId[]
 ): Promise<string> {
-  const tw = pickTop(rows, "tw-news", 5);
-  const ph = pickTop(rows, "ph-news", 5);
-  const twPh = pickTop(rows, "tw-ph", 5);
+  const twClusters = pickTopClusters(rows, "tw-news", 5);
+  const phClusters = pickTopClusters(rows, "ph-news", 5);
+  const twPhClusters = pickTopClusters(rows, "tw-ph", 5);
 
-  const showTwPh = twPh.length >= TW_PH_MIN_ITEMS;
+  const showTwPh = twPhClusters.length >= TW_PH_MIN_CLUSTERS;
 
   const [twDigest, phDigest, twPhDigest] = await Promise.all([
-    digestCategory("Taiwan", tw),
-    digestCategory("Philippines", ph),
+    digestCategory("Taiwan", twClusters.map(clusterForDigest)),
+    digestCategory("Philippines", phClusters.map(clusterForDigest)),
     showTwPh
-      ? digestCategory("Taiwan and Philippines relations / overseas Filipino", twPh)
+      ? digestCategory(
+          "Taiwan and Philippines relations / overseas Filipino",
+          twPhClusters.map(clusterForDigest)
+        )
       : Promise.resolve<CategoryDigest>({ summary: null, labels: [] }),
   ]);
 
@@ -235,12 +297,20 @@ async function composeDigest(
     ``,
     formatWeather(weather),
     ``,
-    section("🇹🇼", "Taiwan", twDigest, tw),
+    section("🇹🇼", "Taiwan", twDigest, twClusters.map((c) => c.rep)),
     ``,
-    section("🇵🇭", "Philippines", phDigest, ph),
+    section("🇵🇭", "Philippines", phDigest, phClusters.map((c) => c.rep)),
   ];
   if (showTwPh) {
-    parts.push("", section("🤝", "Taiwan ↔ Philippines", twPhDigest, twPh));
+    parts.push(
+      "",
+      section(
+        "🤝",
+        "Taiwan ↔ Philippines",
+        twPhDigest,
+        twPhClusters.map((c) => c.rep)
+      )
+    );
   }
   return parts.join("\n");
 }
@@ -277,8 +347,8 @@ Deno.serve(async (req) => {
     // Fire-and-forget: kick the embed-articles function so freshly upserted
     // rows get vectors as soon as possible. Capped at 6s wall-clock so a slow
     // Voyage call can't stall the briefing — if it doesn't finish in time,
-    // pickTop falls through to Jaccard dedupe for the new articles. The
-    // /30-min cron picks up anything missed on the next pass.
+    // clustering falls through to Jaccard for the new articles. The /30-min
+    // cron picks up anything missed on the next pass.
     void triggerEmbedJob().catch(() => {});
 
     const articles = await fetchTodaysArticles(briefingDate);
