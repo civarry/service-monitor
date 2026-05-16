@@ -231,7 +231,15 @@ function pickTopClusters(
   category: string,
   n: number
 ): Cluster[] {
-  const inCategory = rows.filter((r) => r.category === category);
+  let inCategory = rows.filter((r) => r.category === category);
+  // Apply the Taiwan-anchor filter retroactively so already-stored DB rows
+  // that predate the gather-time filter (e.g., Fed Reserve / cosplay stories
+  // ingested before this fix) also get dropped from today's briefing.
+  if (category === "tw-news") {
+    inCategory = inCategory.filter((r) =>
+      isTaiwanAnchored(`${r.title} ${r.description || ""}`)
+    );
+  }
   return clusterArticles(inCategory).slice(0, n);
 }
 
