@@ -6,9 +6,12 @@ export interface Feed {
   category: Exclude<Category, "tw-ph">;
 }
 
+// Focus Taiwan (CNA English) does not currently expose a public RSS feed —
+// every documented path (/rss/index, /rss, /feed, CNA's aspx variants)
+// returns 404 as of May 2026. Leaving TW single-source until a working
+// Taiwan-anchored English feed is identified.
 export const FEEDS: Feed[] = [
   { source: "Taipei Times", url: "https://www.taipeitimes.com/xml/index.rss", category: "tw-news" },
-  { source: "Focus Taiwan", url: "https://focustaiwan.tw/rss/index", category: "tw-news" },
   { source: "Inquirer", url: "https://newsinfo.inquirer.net/feed", category: "ph-news" },
   { source: "Philstar", url: "https://www.philstar.com/rss/headlines", category: "ph-news" },
 ];
