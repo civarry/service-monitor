@@ -1,0 +1,22 @@
+name: Daily Briefing
+
+on:
+  schedule:
+    - cron: '0 23 * * *'  # 7:00 AM Taipei (UTC+8)
+  workflow_dispatch:
+
+jobs:
+  briefing:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Trigger daily-briefing edge function
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          curl -fsS -X POST \
+            "${SUPABASE_URL}/functions/v1/daily-briefing" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{}'
