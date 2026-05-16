@@ -1,5 +1,5 @@
 import "@supabase/functions-js/edge-runtime.d.ts";
-import { FEEDS, isTaiwanPhilippinesNews } from "./lib/sources.ts";
+import { FEEDS, isTaiwanPhilippinesNews, isTaiwanAnchored } from "./lib/sources.ts";
 import { fetchFeed } from "./lib/rss.ts";
 import { getTaipeiWeather, Weather } from "./lib/weather.ts";
 import {
@@ -77,6 +77,21 @@ async function gatherArticles(briefingDate: string): Promise<ArticleRow[]> {
           if (!isTodayInTaipei(it.published_at)) continue;
           const textBlob = `${it.title} ${it.description}`;
           const isTwPh = isTaiwanPhilippinesNews(feed.category, textBlob);
+
+          // For tw-news feeds (currently only Taipei Times), drop items that
+          // don't mention any Taiwan-anchor term. Taipei Times' main feed
+          // mixes in international wire (Fed Reserve, Iran/NK) and soft
+          // features (cosplay) that don't belong in a Taipei-reader briefing.
+          // Articles re-routed to tw-ph by the previous check are kept —
+          // those are cross-coverage and intentionally cross-categorical.
+          if (
+            feed.category === "tw-news" &&
+            !isTwPh &&
+            !isTaiwanAnchored(textBlob)
+          ) {
+            continue;
+          }
+
           results.push({
             title: it.title.slice(0, 500),
             description: it.description.slice(0, 500),
