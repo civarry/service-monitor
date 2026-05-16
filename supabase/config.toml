@@ -410,3 +410,9 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/daily-briefing/deno.json"
 entrypoint = "./functions/daily-briefing/index.ts"
+
+[functions.embed-articles]
+enabled = true
+verify_jwt = false
+import_map = "./functions/embed-articles/deno.json"
+entrypoint = "./functions/embed-articles/index.ts"

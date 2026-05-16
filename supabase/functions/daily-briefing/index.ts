@@ -13,6 +13,21 @@ import {
 import { digestCategory, CategoryDigest } from "./lib/groq.ts";
 import { sendTelegram, escapeHtml } from "./lib/telegram.ts";
 
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
+async function triggerEmbedJob(): Promise<void> {
+  await fetch(`${SUPABASE_URL}/functions/v1/embed-articles`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: "{}",
+    signal: AbortSignal.timeout(6000),
+  });
+}
+
 function taipeiDate(): string {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Taipei",
@@ -116,18 +131,39 @@ function jaccard(a: Set<string>, b: Set<string>): number {
   return inter / (a.size + b.size - inter);
 }
 
-// Drop syndication duplicates (same wire story from Inquirer + Philstar etc.)
-// Threshold tuned for headlines: 0.4 catches "Marcos urges PMA grads not to
-// stay silent" vs "PMA grads should not remain silent — Marcos" while leaving
-// unrelated stories alone.
-function dedupeByTitleSimilarity<T extends { title: string }>(
-  items: T[],
-  threshold = 0.4
-): T[] {
-  const kept: { item: T; tokens: Set<string> }[] = [];
+// Cosine similarity for two same-length numeric vectors.
+// 512-d voyage-3-lite × ~5 kept items ≈ 2.5K ops per article — trivial CPU.
+function cosine(a: number[], b: number[]): number {
+  if (a.length !== b.length || a.length === 0) return 0;
+  let dot = 0, na = 0, nb = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    na += a[i] * a[i];
+    nb += b[i] * b[i];
+  }
+  if (na === 0 || nb === 0) return 0;
+  return dot / (Math.sqrt(na) * Math.sqrt(nb));
+}
+
+// Drop syndication + semantic duplicates. Prefer cosine similarity on
+// embeddings when both items have them (catches semantic near-duplicates
+// like "PMA Graduation Address" vs "PMA Graduation Speech" even when token
+// overlap is low). Fall back to Jaccard on title tokens when either side
+// lacks an embedding (new articles not yet processed by embed-articles, or
+// a Voyage outage). The briefing therefore never breaks on embedding state.
+const SEMANTIC_THRESHOLD = 0.85;
+const JACCARD_THRESHOLD = 0.4;
+
+function dedupeNearDuplicates(items: ArticleWithId[]): ArticleWithId[] {
+  const kept: { item: ArticleWithId; tokens: Set<string> }[] = [];
   for (const item of items) {
     const tokens = titleTokens(item.title);
-    const isDupe = kept.some((k) => jaccard(tokens, k.tokens) >= threshold);
+    const isDupe = kept.some((k) => {
+      if (item.embedding && k.item.embedding) {
+        return cosine(item.embedding, k.item.embedding) >= SEMANTIC_THRESHOLD;
+      }
+      return jaccard(tokens, k.tokens) >= JACCARD_THRESHOLD;
+    });
     if (!isDupe) kept.push({ item, tokens });
   }
   return kept.map((k) => k.item);
@@ -135,7 +171,7 @@ function dedupeByTitleSimilarity<T extends { title: string }>(
 
 function pickTop(rows: ArticleWithId[], category: string, n: number): ArticleWithId[] {
   const inCategory = rows.filter((r) => r.category === category);
-  const deduped = dedupeByTitleSimilarity(inCategory);
+  const deduped = dedupeNearDuplicates(inCategory);
   return deduped.slice(0, n);
 }
 
@@ -237,6 +273,13 @@ Deno.serve(async (req) => {
     ]);
     const deduped = dedupeByUrl(rawArticles);
     if (deduped.length > 0) await upsertArticles(deduped);
+
+    // Fire-and-forget: kick the embed-articles function so freshly upserted
+    // rows get vectors as soon as possible. Capped at 6s wall-clock so a slow
+    // Voyage call can't stall the briefing — if it doesn't finish in time,
+    // pickTop falls through to Jaccard dedupe for the new articles. The
+    // /30-min cron picks up anything missed on the next pass.
+    void triggerEmbedJob().catch(() => {});
 
     const articles = await fetchTodaysArticles(briefingDate);
 
