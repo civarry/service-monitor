@@ -93,8 +93,50 @@ function dedupeByUrl(rows: ArticleRow[]): ArticleRow[] {
   return out;
 }
 
+const TITLE_STOPWORDS = new Set([
+  "a","an","and","are","as","at","be","been","by","for","from","has","have",
+  "in","is","it","its","of","on","or","that","the","to","was","were","will",
+  "with","over","after","amid","says","said","says:","new","s","t",
+]);
+
+function titleTokens(title: string): Set<string> {
+  return new Set(
+    title
+      .toLowerCase()
+      .replace(/[^\w\s]/g, " ")
+      .split(/\s+/)
+      .filter((w) => w.length >= 3 && !TITLE_STOPWORDS.has(w))
+  );
+}
+
+function jaccard(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0;
+  let inter = 0;
+  for (const x of a) if (b.has(x)) inter++;
+  return inter / (a.size + b.size - inter);
+}
+
+// Drop syndication duplicates (same wire story from Inquirer + Philstar etc.)
+// Threshold tuned for headlines: 0.4 catches "Marcos urges PMA grads not to
+// stay silent" vs "PMA grads should not remain silent — Marcos" while leaving
+// unrelated stories alone.
+function dedupeByTitleSimilarity<T extends { title: string }>(
+  items: T[],
+  threshold = 0.4
+): T[] {
+  const kept: { item: T; tokens: Set<string> }[] = [];
+  for (const item of items) {
+    const tokens = titleTokens(item.title);
+    const isDupe = kept.some((k) => jaccard(tokens, k.tokens) >= threshold);
+    if (!isDupe) kept.push({ item, tokens });
+  }
+  return kept.map((k) => k.item);
+}
+
 function pickTop(rows: ArticleWithId[], category: string, n: number): ArticleWithId[] {
-  return rows.filter((r) => r.category === category).slice(0, n);
+  const inCategory = rows.filter((r) => r.category === category);
+  const deduped = dedupeByTitleSimilarity(inCategory);
+  return deduped.slice(0, n);
 }
 
 function headlineLinks(items: ArticleWithId[], labels: string[]): string {
@@ -128,6 +170,11 @@ function section(emoji: string, label: string, digest: CategoryDigest, items: Ar
   return parts.join("\n");
 }
 
+// Below this, the TW↔PH section is hidden entirely (header + bullet alone
+// looks lonely). A single cross-cutting article better belongs as a footnote;
+// for now we just suppress it until the day actually has cross-coverage.
+const TW_PH_MIN_ITEMS = 2;
+
 async function composeDigest(
   weather: Weather | null,
   rows: ArticleWithId[]
@@ -136,13 +183,17 @@ async function composeDigest(
   const ph = pickTop(rows, "ph-news", 5);
   const twPh = pickTop(rows, "tw-ph", 5);
 
+  const showTwPh = twPh.length >= TW_PH_MIN_ITEMS;
+
   const [twDigest, phDigest, twPhDigest] = await Promise.all([
     digestCategory("Taiwan", tw),
     digestCategory("Philippines", ph),
-    digestCategory("Taiwan and Philippines relations / overseas Filipino", twPh),
+    showTwPh
+      ? digestCategory("Taiwan and Philippines relations / overseas Filipino", twPh)
+      : Promise.resolve<CategoryDigest>({ summary: null, labels: [] }),
   ]);
 
-  return [
+  const parts: string[] = [
     `☀️ <b>Good Morning Taipei</b>`,
     `<i>${escapeHtml(taipeiDateLong())}</i>`,
     ``,
@@ -151,9 +202,11 @@ async function composeDigest(
     section("🇹🇼", "Taiwan", twDigest, tw),
     ``,
     section("🇵🇭", "Philippines", phDigest, ph),
-    ``,
-    section("🤝", "Taiwan ↔ Philippines", twPhDigest, twPh),
-  ].join("\n");
+  ];
+  if (showTwPh) {
+    parts.push("", section("🤝", "Taiwan ↔ Philippines", twPhDigest, twPh));
+  }
+  return parts.join("\n");
 }
 
 Deno.serve(async (req) => {
