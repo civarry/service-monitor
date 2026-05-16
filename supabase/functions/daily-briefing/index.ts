@@ -270,6 +270,22 @@ function clusterForDigest(c: Cluster) {
   };
 }
 
+// Append a "✦N" badge to labels for multi-outlet clusters so the reader can
+// see clustering working at a glance. Singletons (size 1) get no badge.
+function withClusterBadges(
+  digest: CategoryDigest,
+  clusters: Cluster[]
+): CategoryDigest {
+  return {
+    summary: digest.summary,
+    labels: digest.labels.map((label, i) => {
+      const c = clusters[i];
+      if (!c || c.members.length < 2) return label;
+      return `${label} ✦${c.members.length}`;
+    }),
+  };
+}
+
 async function composeDigest(
   weather: Weather | null,
   rows: ArticleWithId[]
@@ -297,9 +313,9 @@ async function composeDigest(
     ``,
     formatWeather(weather),
     ``,
-    section("🇹🇼", "Taiwan", twDigest, twClusters.map((c) => c.rep)),
+    section("🇹🇼", "Taiwan", withClusterBadges(twDigest, twClusters), twClusters.map((c) => c.rep)),
     ``,
-    section("🇵🇭", "Philippines", phDigest, phClusters.map((c) => c.rep)),
+    section("🇵🇭", "Philippines", withClusterBadges(phDigest, phClusters), phClusters.map((c) => c.rep)),
   ];
   if (showTwPh) {
     parts.push(
@@ -307,7 +323,7 @@ async function composeDigest(
       section(
         "🤝",
         "Taiwan ↔ Philippines",
-        twPhDigest,
+        withClusterBadges(twPhDigest, twPhClusters),
         twPhClusters.map((c) => c.rep)
       )
     );

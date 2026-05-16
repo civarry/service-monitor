@@ -8,6 +8,7 @@ export interface Feed {
 
 export const FEEDS: Feed[] = [
   { source: "Taipei Times", url: "https://www.taipeitimes.com/xml/index.rss", category: "tw-news" },
+  { source: "Focus Taiwan", url: "https://focustaiwan.tw/rss/index", category: "tw-news" },
   { source: "Inquirer", url: "https://newsinfo.inquirer.net/feed", category: "ph-news" },
   { source: "Philstar", url: "https://www.philstar.com/rss/headlines", category: "ph-news" },
 ];
