@@ -399,6 +399,106 @@ def generate_reply_draft(name, email, message_text):
         return None
 
 
+# ---------- PROJECT GAP ANALYSIS ----------
+
+REPO_GRAPH_URL = "https://civarry.github.io/repo_graph.json"
+CLUSTER_EDGE = 0.40  # edges this strong define thematic clusters
+WEAK_EDGE = 0.25     # below this, edges are keep-connected links, not real similarity
+
+
+def analyze_repo_graph():
+    """Cluster the portfolio's repo similarity graph and find its gaps."""
+    response = requests.get(REPO_GRAPH_URL, timeout=10)
+    response.raise_for_status()
+    graph = response.json()
+    repos = graph["repos"]
+    n = len(repos)
+
+    parent = list(range(n))
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for e in graph["edges"]:
+        if e["sim"] >= CLUSTER_EDGE:
+            parent[find(e["a"])] = find(e["b"])
+
+    groups = {}
+    for i in range(n):
+        groups.setdefault(find(i), []).append(i)
+    ordered = sorted(groups.values(), key=len, reverse=True)
+
+    def describe(members):
+        langs = {}
+        for i in members:
+            lang = repos[i]["lang"] or "?"
+            langs[lang] = langs.get(lang, 0) + 1
+        return {
+            "names": [repos[i]["name"] for i in members],
+            "lang": max(langs, key=langs.get),
+        }
+
+    clusters = [describe(m) for m in ordered if len(m) > 1]
+    orphans = [repos[m[0]]["name"] for m in ordered if len(m) == 1]
+
+    weak = sorted(
+        (e for e in graph["edges"] if e["sim"] < WEAK_EDGE),
+        key=lambda e: e["sim"]
+    )[:5]
+    weak_pairs = [
+        f'{repos[e["a"]]["name"]} — {repos[e["b"]]["name"]} ({int(e["sim"] * 100)}%)'
+        for e in weak
+    ]
+
+    return {"clusters": clusters, "orphans": orphans, "weak": weak_pairs, "total": n}
+
+
+def generate_next_project_idea(analysis):
+    try:
+        cluster_lines = "\n".join(
+            f'{i}. [{c["lang"]}] {", ".join(c["names"])}'
+            for i, c in enumerate(analysis["clusters"], 1)
+        )
+        prompt = (
+            "You advise CJ, a developer, on what to build next. "
+            "His GitHub repos cluster by semantic similarity:\n\n"
+            f"{cluster_lines}\n\n"
+            f"Isolated repos (connected to nothing): {', '.join(analysis['orphans']) or 'none'}\n"
+            f"Weakest connections: {'; '.join(analysis['weak']) or 'none'}\n\n"
+            "Suggest exactly ONE new project that bridges the biggest gap in this "
+            "graph — connecting two clusters, or pulling an isolated repo into the "
+            "story of his work. It must be shippable in a few weekends and reuse "
+            "his existing skills (Python, Swift, JavaScript, Streamlit, Supabase, "
+            "Telegram bots, free-tier hosting).\n\n"
+            "Answer in exactly this format:\n"
+            "Name: <project name>\n"
+            "What: <two sentences>\n"
+            "Bridges: <which repos or clusters it connects, and how>\n"
+            "Why: <why this gap matters for his portfolio>"
+        )
+        response = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": GROQ_MODEL,
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 400,
+                "temperature": 0.8
+            },
+            timeout=20
+        )
+        response.raise_for_status()
+        return response.json()["choices"][0]["message"]["content"].strip()
+    except (requests.RequestException, KeyError, IndexError):
+        return None
+
+
 # ---------- REPLY MANAGEMENT ----------
 
 def save_reply(message_id, reply_text, reply_status):
@@ -862,6 +962,42 @@ def handle_command(text):
             f"<b>Type:</b> {atype}\n"
             f"<b>Duration:</b> {duration_label}"
         )
+        return None
+
+    if text.startswith("/nextproject"):
+        try:
+            analysis = analyze_repo_graph()
+        except (requests.RequestException, KeyError, ValueError):
+            send_telegram_message("Couldn't load repo_graph.json from the site.")
+            return None
+
+        cluster_lines = []
+        for i, c in enumerate(analysis["clusters"], 1):
+            names = ", ".join(c["names"][:8]) + ("…" if len(c["names"]) > 8 else "")
+            cluster_lines.append(f"<b>{i}.</b> [{html.escape(c['lang'])}] {html.escape(names)}")
+        raw = (
+            f"<b>Repo graph:</b> {analysis['total']} repos · "
+            f"{len(analysis['clusters'])} clusters · {len(analysis['orphans'])} isolated\n\n"
+            + "\n".join(cluster_lines)
+        )
+        if analysis["orphans"]:
+            raw += "\n\n<b>Isolated:</b> " + html.escape(", ".join(analysis["orphans"]))
+        if analysis["weak"]:
+            raw += "\n<b>Weakest links:</b> " + html.escape("; ".join(analysis["weak"]))
+
+        if "raw" in text.lower():
+            send_telegram_message(raw)
+            return None
+
+        idea = generate_next_project_idea(analysis)
+        if idea:
+            send_telegram_message(
+                f"<b>Next project idea</b>\n\n{html.escape(idea)}\n\n"
+                f"<i>/nextproject raw — see the gap analysis behind this</i>"
+            )
+            save_log_entry("command", "Generated next-project idea")
+            return "Next-project idea generated"
+        send_telegram_message(raw + "\n\n<i>AI suggestion failed — raw gap analysis above.</i>")
         return None
 
 
