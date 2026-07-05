@@ -747,6 +747,167 @@ async function handleAnnounce(args: string): Promise<void> {
   );
 }
 
+// ---------- NEXT PROJECT (portfolio gap analysis) ----------
+
+const REPO_GRAPH_URL = "https://civarry.github.io/repo_graph.json";
+const CLUSTER_EDGE = 0.4; // edges this strong define thematic clusters
+const WEAK_EDGE = 0.25; // below this, edges are keep-connected links, not real similarity
+
+interface GraphRepo {
+  name: string;
+  lang: string;
+  desc: string;
+}
+
+interface GraphEdge {
+  a: number;
+  b: number;
+  sim: number;
+}
+
+interface GapAnalysis {
+  clusters: { names: string[]; lang: string }[];
+  orphans: string[];
+  weak: string[];
+  total: number;
+}
+
+async function analyzeRepoGraph(): Promise<GapAnalysis> {
+  const res = await fetch(REPO_GRAPH_URL);
+  if (!res.ok) throw new Error("repo_graph.json unavailable");
+  const graph = (await res.json()) as { repos: GraphRepo[]; edges: GraphEdge[] };
+  const repos = graph.repos;
+  const n = repos.length;
+
+  // Union-find over quality edges
+  const parent = Array.from({ length: n }, (_, i) => i);
+  const find = (x: number): number => {
+    while (parent[x] !== x) {
+      parent[x] = parent[parent[x]];
+      x = parent[x];
+    }
+    return x;
+  };
+  for (const e of graph.edges) {
+    if (e.sim >= CLUSTER_EDGE) parent[find(e.a)] = find(e.b);
+  }
+
+  const groups = new Map<number, number[]>();
+  for (let i = 0; i < n; i++) {
+    const r = find(i);
+    if (!groups.has(r)) groups.set(r, []);
+    groups.get(r)!.push(i);
+  }
+  const ordered = [...groups.values()].sort((a, b) => b.length - a.length);
+
+  const describe = (members: number[]) => {
+    const langs = new Map<string, number>();
+    for (const i of members) {
+      const l = repos[i].lang || "?";
+      langs.set(l, (langs.get(l) || 0) + 1);
+    }
+    const lang = [...langs.entries()].sort((a, b) => b[1] - a[1])[0][0];
+    return { names: members.map((i) => repos[i].name), lang };
+  };
+
+  return {
+    clusters: ordered.filter((m) => m.length > 1).map(describe),
+    orphans: ordered.filter((m) => m.length === 1).map((m) => repos[m[0]].name),
+    weak: graph.edges
+      .filter((e) => e.sim < WEAK_EDGE)
+      .sort((a, b) => a.sim - b.sim)
+      .slice(0, 5)
+      .map((e) => `${repos[e.a].name} — ${repos[e.b].name} (${Math.round(e.sim * 100)}%)`),
+    total: n,
+  };
+}
+
+async function generateNextProjectIdea(analysis: GapAnalysis): Promise<string | null> {
+  const groqKey = Deno.env.get("GROQ_API_KEY");
+  if (!groqKey) return null;
+  try {
+    const clusterLines = analysis.clusters
+      .map((c, i) => `${i + 1}. [${c.lang}] ${c.names.join(", ")}`)
+      .join("\n");
+    const prompt =
+      "You advise CJ, a developer, on what to build next. " +
+      "His GitHub repos cluster by semantic similarity:\n\n" +
+      `${clusterLines}\n\n` +
+      `Isolated repos (connected to nothing): ${analysis.orphans.join(", ") || "none"}\n` +
+      `Weakest connections: ${analysis.weak.join("; ") || "none"}\n\n` +
+      "Suggest exactly ONE new project that bridges the biggest gap in this " +
+      "graph — connecting two clusters, or pulling an isolated repo into the " +
+      "story of his work. It must be shippable in a few weekends and reuse " +
+      "his existing skills (Python, Swift, JavaScript, Streamlit, Supabase, " +
+      "Telegram bots, free-tier hosting).\n\n" +
+      "Answer in exactly this format:\n" +
+      "Name: <project name>\n" +
+      "What: <two sentences>\n" +
+      "Bridges: <which repos or clusters it connects, and how>\n" +
+      "Why: <why this gap matters for his portfolio>";
+
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${groqKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "llama-3.1-8b-instant",
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: 400,
+        temperature: 0.8,
+      }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.choices?.[0]?.message?.content?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+async function handleNextProject(args: string): Promise<string | null> {
+  let analysis: GapAnalysis;
+  try {
+    analysis = await analyzeRepoGraph();
+  } catch {
+    await sendTelegram("Couldn't load repo_graph.json from the site.");
+    return null;
+  }
+
+  const clusterLines = analysis.clusters.map((c, i) => {
+    const names = c.names.slice(0, 8).join(", ") + (c.names.length > 8 ? "…" : "");
+    return `<b>${i + 1}.</b> [${escapeHtml(c.lang)}] ${escapeHtml(names)}`;
+  });
+  let raw =
+    `<b>Repo graph:</b> ${analysis.total} repos · ${analysis.clusters.length} clusters · ` +
+    `${analysis.orphans.length} isolated\n\n` +
+    clusterLines.join("\n");
+  if (analysis.orphans.length) {
+    raw += `\n\n<b>Isolated:</b> ${escapeHtml(analysis.orphans.join(", "))}`;
+  }
+  if (analysis.weak.length) {
+    raw += `\n<b>Weakest links:</b> ${escapeHtml(analysis.weak.join("; "))}`;
+  }
+
+  if (args.trim().toLowerCase() === "raw") {
+    await sendTelegram(raw);
+    return null;
+  }
+
+  const idea = await generateNextProjectIdea(analysis);
+  if (idea) {
+    await sendTelegram(
+      `<b>Next project idea</b>\n\n${escapeHtml(idea)}\n\n` +
+        `<i>/nextproject raw — see the gap analysis behind this</i>`
+    );
+    return "Generated next-project idea";
+  }
+  await sendTelegram(raw + "\n\n<i>AI suggestion failed — raw gap analysis above.</i>");
+  return null;
+}
+
 // ---------- MAIN HANDLER ----------
 
 Deno.serve(async (req) => {
@@ -829,6 +990,9 @@ Deno.serve(async (req) => {
       case "/brief":
       case "/news":
         logMsg = await handleBrief();
+        break;
+      case "/nextproject":
+        logMsg = await handleNextProject(args);
         break;
       default:
         await sendTelegram(`Unknown command: ${escapeHtml(resolvedCommand)}`);
