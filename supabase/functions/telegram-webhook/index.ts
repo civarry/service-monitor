@@ -945,6 +945,44 @@ async function handleNextProject(args: string): Promise<string | null> {
   return null;
 }
 
+// ---------- REPO AUDIT (documentation standard) ----------
+
+const REPO_HEALTH_URL = "https://civarry.github.io/repo_health.json";
+
+async function handleAudit(): Promise<string | null> {
+  try {
+    const res = await fetch(REPO_HEALTH_URL);
+    if (!res.ok) throw new Error("repo_health.json unavailable");
+    const h = (await res.json()) as {
+      date: string;
+      total: number;
+      passing: number;
+      repos: { name: string; missing: string[] }[];
+    };
+    const failing = h.repos.filter((r) => r.missing.length > 0);
+
+    let msg = `<b>Repo audit</b> (${escapeHtml(h.date)}) — ${h.passing}/${h.total} meet the standard`;
+    if (failing.length === 0) {
+      msg += "\n\nEverything is documented. Nothing to fix.";
+    } else {
+      msg +=
+        `\n\n<b>Needs attention (${failing.length}):</b>\n` +
+        failing
+          .map((r) => `• <b>${escapeHtml(r.name)}</b> — ${escapeHtml(r.missing.join(", "))}`)
+          .join("\n") +
+        "\n\n<i>Standard: description (15+ chars), 3+ topics, README with real content. " +
+        "Archive a repo to exclude it from the audit.</i>";
+    }
+    await sendTelegram(msg);
+    return "Repo audit sent";
+  } catch {
+    await sendTelegram(
+      "Couldn't load repo_health.json — has the Update Repo Health workflow run yet?"
+    );
+    return null;
+  }
+}
+
 // ---------- MAIN HANDLER ----------
 
 Deno.serve(async (req) => {
@@ -1030,6 +1068,9 @@ Deno.serve(async (req) => {
         break;
       case "/nextproject":
         logMsg = await handleNextProject(args);
+        break;
+      case "/audit":
+        logMsg = await handleAudit();
         break;
       default:
         await sendTelegram(`Unknown command: ${escapeHtml(resolvedCommand)}`);

@@ -354,6 +354,30 @@ async function composeDigest(
   return parts.join("\n");
 }
 
+// One-line repo hygiene nag, appended only when repos fail the
+// documentation standard (data from the nightly Update Repo Health action)
+async function repoHygieneLine(): Promise<string | null> {
+  try {
+    const res = await fetch("https://civarry.github.io/repo_health.json");
+    if (!res.ok) return null;
+    const h = (await res.json()) as {
+      total: number;
+      passing: number;
+      repos: { name: string; missing: string[] }[];
+    };
+    const failing = h.repos.filter((r) => r.missing.length > 0);
+    if (failing.length === 0) return null;
+    const names = failing.slice(0, 5).map((r) => r.name).join(", ");
+    const more = failing.length > 5 ? ` +${failing.length - 5} more` : "";
+    return (
+      `🧹 <b>Repo hygiene</b> — ${h.passing}/${h.total} documented. ` +
+      `Needs attention: ${escapeHtml(names)}${more} · /audit for details`
+    );
+  } catch {
+    return null;
+  }
+}
+
 Deno.serve(async (req) => {
   const briefingDate = taipeiDate();
 
@@ -392,7 +416,9 @@ Deno.serve(async (req) => {
 
     const articles = await fetchTodaysArticles(briefingDate);
 
-    const message = await composeDigest(weather, articles);
+    let message = await composeDigest(weather, articles);
+    const hygiene = await repoHygieneLine();
+    if (hygiene) message += `\n\n${hygiene}`;
     const sent = await sendTelegram(message);
     await saveBriefing(briefingDate, weather, message);
 
