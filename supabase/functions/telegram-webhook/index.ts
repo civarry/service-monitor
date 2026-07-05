@@ -751,7 +751,6 @@ async function handleAnnounce(args: string): Promise<void> {
 
 const REPO_GRAPH_URL = "https://civarry.github.io/repo_graph.json";
 const CLUSTER_EDGE = 0.4; // edges this strong define thematic clusters
-const WEAK_EDGE = 0.25; // below this, edges are keep-connected links, not real similarity
 
 interface GraphRepo {
   name: string;
@@ -813,8 +812,7 @@ async function analyzeRepoGraph(): Promise<GapAnalysis> {
   return {
     clusters: ordered.filter((m) => m.length > 1).map(describe),
     orphans: ordered.filter((m) => m.length === 1).map((m) => repos[m[0]].name),
-    weak: graph.edges
-      .filter((e) => e.sim < WEAK_EDGE)
+    weak: [...graph.edges]
       .sort((a, b) => a.sim - b.sim)
       .slice(0, 5)
       .map((e) => `${repos[e.a].name} — ${repos[e.b].name} (${Math.round(e.sim * 100)}%)`),
