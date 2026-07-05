@@ -765,10 +765,14 @@ interface GraphEdge {
 }
 
 interface GapAnalysis {
-  clusters: { names: string[]; lang: string }[];
-  orphans: string[];
+  clusters: { names: string[]; lang: string; blurbs: string[] }[];
+  scattered: { name: string; desc: string }[];
   weak: string[];
   total: number;
+}
+
+function shortDesc(r: GraphRepo): string {
+  return (r.desc || "").slice(0, 70);
 }
 
 async function analyzeRepoGraph(): Promise<GapAnalysis> {
@@ -778,7 +782,15 @@ async function analyzeRepoGraph(): Promise<GapAnalysis> {
   const repos = graph.repos;
   const n = repos.length;
 
-  // Union-find over quality edges
+  // Truly scattered = no edges at all (the graph keeps only genuine
+  // similarity edges, so degree 0 means unrelated to everything)
+  const degree = new Array(n).fill(0);
+  for (const e of graph.edges) {
+    degree[e.a]++;
+    degree[e.b]++;
+  }
+
+  // Union-find over strong edges → thematic clusters
   const parent = Array.from({ length: n }, (_, i) => i);
   const find = (x: number): number => {
     while (parent[x] !== x) {
@@ -806,12 +818,23 @@ async function analyzeRepoGraph(): Promise<GapAnalysis> {
       langs.set(l, (langs.get(l) || 0) + 1);
     }
     const lang = [...langs.entries()].sort((a, b) => b[1] - a[1])[0][0];
-    return { names: members.map((i) => repos[i].name), lang };
+    return {
+      names: members.map((i) => repos[i].name),
+      lang,
+      blurbs: members.map((i) =>
+        shortDesc(repos[i])
+          ? `${repos[i].name} (${shortDesc(repos[i])})`
+          : repos[i].name
+      ),
+    };
   };
 
   return {
     clusters: ordered.filter((m) => m.length > 1).map(describe),
-    orphans: ordered.filter((m) => m.length === 1).map((m) => repos[m[0]].name),
+    scattered: repos
+      .map((r, i) => ({ name: r.name, desc: shortDesc(r), i }))
+      .filter((x) => degree[x.i] === 0)
+      .map(({ name, desc }) => ({ name, desc })),
     weak: [...graph.edges]
       .sort((a, b) => a.sim - b.sim)
       .slice(0, 5)
@@ -825,24 +848,40 @@ async function generateNextProjectIdea(analysis: GapAnalysis): Promise<string | 
   if (!groqKey) return null;
   try {
     const clusterLines = analysis.clusters
-      .map((c, i) => `${i + 1}. [${c.lang}] ${c.names.join(", ")}`)
+      .map((c, i) => `${i + 1}. [${c.lang}] ${c.blurbs.join("; ")}`)
+      .join("\n");
+    const scatteredLines = analysis.scattered
+      .map((s) => `- ${s.name}${s.desc ? ` — ${s.desc}` : ""}`)
       .join("\n");
     const prompt =
-      "You advise CJ, a developer, on what to build next. " +
-      "His GitHub repos cluster by semantic similarity:\n\n" +
+      "You are helping CJ, a developer, decide what to build next. His GitHub " +
+      "portfolio below is grouped by semantic similarity of what the projects " +
+      "actually do.\n\n" +
+      "Established themes (clustered work):\n" +
       `${clusterLines}\n\n` +
-      `Isolated repos (connected to nothing): ${analysis.orphans.join(", ") || "none"}\n` +
-      `Weakest connections: ${analysis.weak.join("; ") || "none"}\n\n` +
-      "Suggest exactly ONE new project that bridges the biggest gap in this " +
-      "graph — connecting two clusters, or pulling an isolated repo into the " +
-      "story of his work. It must be shippable in a few weekends and reuse " +
-      "his existing skills (Python, Swift, JavaScript, Streamlit, Supabase, " +
-      "Telegram bots, free-tier hosting).\n\n" +
-      "Answer in exactly this format:\n" +
+      "Scattered projects — no strong relation to anything else he's built yet:\n" +
+      `${scatteredLines || "- none"}\n\n` +
+      "Things he ALREADY has, so never propose rebuilding them or thin " +
+      "integrations of them: a portfolio website with a 3D repo graph, a " +
+      "Supabase + Telegram backend with AI-drafted replies and remote site " +
+      "control, payroll document tooling, multiple Telegram bots.\n\n" +
+      "Propose exactly ONE new project. Hard rules:\n" +
+      "- A standalone tool or product a real person would use. NOT 'an " +
+      "integration', NOT 'a bot that connects X to Y', and NOT another " +
+      "Telegram bot.\n" +
+      "- It should either extend one of his strongest themes into genuinely " +
+      "new territory, or give ONE scattered project a sibling so a new theme " +
+      "starts to form. Name which one and be specific about the connection.\n" +
+      "- Weekend-scale and free-tier friendly. Stacks he knows: Python, " +
+      "Swift (native macOS), JavaScript, Streamlit, Supabase.\n" +
+      "- His style: he builds tools for things that are tedious, repetitive, " +
+      "or missing — practical over impressive.\n\n" +
+      "Answer in exactly this format, no preamble:\n" +
       "Name: <project name>\n" +
       "What: <two sentences>\n" +
-      "Bridges: <which repos or clusters it connects, and how>\n" +
-      "Why: <why this gap matters for his portfolio>";
+      "Bridges: <which repo or theme it relates to, and how the similarity " +
+      "will show up>\n" +
+      "Why: <why this particular gap is the one worth filling now>";
 
     const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
@@ -851,10 +890,10 @@ async function generateNextProjectIdea(analysis: GapAnalysis): Promise<string | 
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "llama-3.1-8b-instant",
+        model: "llama-3.3-70b-versatile",
         messages: [{ role: "user", content: prompt }],
-        max_tokens: 400,
-        temperature: 0.8,
+        max_tokens: 500,
+        temperature: 0.9,
       }),
     });
     if (!res.ok) return null;
@@ -880,10 +919,10 @@ async function handleNextProject(args: string): Promise<string | null> {
   });
   let raw =
     `<b>Repo graph:</b> ${analysis.total} repos · ${analysis.clusters.length} clusters · ` +
-    `${analysis.orphans.length} isolated\n\n` +
+    `${analysis.scattered.length} scattered\n\n` +
     clusterLines.join("\n");
-  if (analysis.orphans.length) {
-    raw += `\n\n<b>Isolated:</b> ${escapeHtml(analysis.orphans.join(", "))}`;
+  if (analysis.scattered.length) {
+    raw += `\n\n<b>Scattered:</b> ${escapeHtml(analysis.scattered.map((s) => s.name).join(", "))}`;
   }
   if (analysis.weak.length) {
     raw += `\n<b>Weakest links:</b> ${escapeHtml(analysis.weak.join("; "))}`;
