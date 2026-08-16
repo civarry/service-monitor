@@ -945,6 +945,46 @@ async function handleNextProject(args: string): Promise<string | null> {
   return null;
 }
 
+// ---------- CLOSURE ALERTS (on-demand check) ----------
+
+async function handleClosures(): Promise<string | null> {
+  try {
+    const url = `${SUPABASE_URL}/functions/v1/closure-alerts`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({}),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      await sendTelegram(`<b>Closure check failed:</b> ${res.status}\n${escapeHtml(body.slice(0, 500))}`);
+      return null;
+    }
+    const data = await res.json().catch(() => null) as
+      { checked?: number; tracked_active?: number; sent?: number } | null;
+    if (!data) {
+      await sendTelegram("Closure check ran, but the response couldn't be read.");
+      return null;
+    }
+    if ((data.sent ?? 0) > 0) {
+      await sendTelegram(`✅ Sent ${data.sent} new closure alert(s) above.`);
+    } else {
+      await sendTelegram(
+        `No new closures for Taipei/New Taipei/Taoyuan right now. ` +
+        `(${data.tracked_active ?? 0} active in tracked cities, ${data.checked ?? 0} total in the feed)`
+      );
+    }
+    return `Closure check: ${data.sent ?? 0} sent`;
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    await sendTelegram(`<b>Closure check error:</b>\n${escapeHtml(errorMsg)}`);
+    return null;
+  }
+}
+
 // ---------- REPO AUDIT (documentation standard) ----------
 
 const REPO_HEALTH_URL = "https://civarry.github.io/repo_health.json";
@@ -1000,6 +1040,7 @@ async function handleSyncCommands(): Promise<string | null> {
     { command: "announce", description: "Site banner — /announce <msg> --flash 20s" },
     { command: "nextproject", description: "What to build next (add 'raw' for the gap analysis)" },
     { command: "audit", description: "Repo documentation audit" },
+    { command: "closures", description: "Check Taipei/New Taipei/Taoyuan closures now" },
     { command: "synccommands", description: "Refresh this command menu" },
   ];
   const res = await fetch(
@@ -1106,6 +1147,9 @@ Deno.serve(async (req) => {
         break;
       case "/audit":
         logMsg = await handleAudit();
+        break;
+      case "/closures":
+        logMsg = await handleClosures();
         break;
       case "/synccommands":
         logMsg = await handleSyncCommands();
