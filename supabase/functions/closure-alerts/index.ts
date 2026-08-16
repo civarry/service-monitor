@@ -2,7 +2,7 @@ import "@supabase/functions-js/edge-runtime.d.ts";
 import { fetchClosureAlerts, ClosureAlert } from "./lib/ncdr.ts";
 import { fetchSeenIds, markSeen } from "./lib/db.ts";
 import { sendTelegram, escapeHtml } from "./lib/telegram.ts";
-import { translateAlert } from "./lib/groq.ts";
+import { translateAlert, Translation } from "./lib/groq.ts";
 
 // Only these cities trigger a Telegram alert. Match is by prefix so e.g.
 // "桃園市復興區" (a district within Taoyuan) still matches "桃園市".
@@ -23,9 +23,7 @@ function formatTaipeiTime(d: Date): string {
   }).format(d);
 }
 
-async function formatAlert(a: ClosureAlert): Promise<string> {
-  const translation = await translateAlert(a.locality, a.message);
-
+function formatAlert(a: ClosureAlert, translation: Translation | null): string {
   const parts = [
     `⚠️ <b>停班停課通知</b> / Work &amp; School Closure`,
     translation
@@ -64,6 +62,15 @@ Deno.serve(async (req) => {
     const alerts = body.test ? [makeTestAlert()] : await fetchClosureAlerts();
     const now = new Date();
 
+    // Translate everything in the feed once, up front, so both the actual
+    // Telegram alert (for new ones) and the /closures feed summary (for
+    // everything) show English — not just whichever entries happen to be new.
+    const translations = new Map<string, Translation | null>(
+      await Promise.all(
+        alerts.map(async (a) => [a.id, await translateAlert(a.locality, a.message)] as const)
+      )
+    );
+
     const candidates = alerts.filter(
       (a) => isTracked(a.locality) && (!a.expires || a.expires > now)
     );
@@ -73,7 +80,7 @@ Deno.serve(async (req) => {
 
     let sent = 0;
     for (const alert of fresh) {
-      const ok = await sendTelegram(await formatAlert(alert));
+      const ok = await sendTelegram(formatAlert(alert, translations.get(alert.id) ?? null));
       if (ok) sent++;
       // Mark seen regardless of Telegram delivery outcome — a delivery
       // failure shouldn't cause the same alert to retry forever and spam
@@ -91,13 +98,18 @@ Deno.serve(async (req) => {
         // Everything currently in the feed, tracked or not, expired or not —
         // lets a caller (e.g. the /closures Telegram command) show what's
         // actually there instead of just a count.
-        feed: alerts.map((a) => ({
-          locality: a.locality,
-          message: a.message,
-          tracked: isTracked(a.locality),
-          expires: a.expires ? a.expires.toISOString() : null,
-          expired: a.expires ? a.expires <= now : false,
-        })),
+        feed: alerts.map((a) => {
+          const t = translations.get(a.id) ?? null;
+          return {
+            locality: a.locality,
+            locality_en: t?.localityEn ?? null,
+            message: a.message,
+            message_en: t?.messageEn ?? null,
+            tracked: isTracked(a.locality),
+            expires: a.expires ? a.expires.toISOString() : null,
+            expired: a.expires ? a.expires <= now : false,
+          };
+        }),
       }),
       { status: 200, headers: { "Content-Type": "application/json" } }
     );

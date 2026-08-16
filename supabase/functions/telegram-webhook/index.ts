@@ -966,7 +966,11 @@ async function handleClosures(): Promise<string | null> {
     const data = await res.json().catch(() => null) as
       {
         checked?: number; tracked_active?: number; sent?: number;
-        feed?: { locality: string; message: string; tracked: boolean; expires: string | null; expired: boolean }[];
+        feed?: {
+          locality: string; locality_en: string | null;
+          message: string; message_en: string | null;
+          tracked: boolean; expires: string | null; expired: boolean;
+        }[];
       } | null;
     if (!data) {
       await sendTelegram("Closure check ran, but the response couldn't be read.");
@@ -986,7 +990,13 @@ async function handleClosures(): Promise<string | null> {
         feed
           .map((f) => {
             const flag = f.tracked ? (f.expired ? "⏱ expired" : "✓ tracked, not new") : "not tracked";
-            return `• <b>${escapeHtml(f.locality)}</b> (${flag})\n  ${escapeHtml(f.message)}`;
+            const localityLine = f.locality_en
+              ? `<b>${escapeHtml(f.locality)}</b> (${escapeHtml(f.locality_en)}) — ${flag}`
+              : `<b>${escapeHtml(f.locality)}</b> (${flag})`;
+            const messageLine = f.message_en
+              ? `  ${escapeHtml(f.message)}\n  ${escapeHtml(f.message_en)}`
+              : `  ${escapeHtml(f.message)}`;
+            return `• ${localityLine}\n${messageLine}`;
           })
           .join("\n");
     }
