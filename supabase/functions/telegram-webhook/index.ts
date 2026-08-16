@@ -970,6 +970,7 @@ async function handleClosures(): Promise<string | null> {
           locality: string; locality_en: string | null;
           message: string; message_en: string | null;
           tracked: boolean; expires: string | null; expired: boolean;
+          already_sent: boolean;
         }[];
       } | null;
     if (!data) {
@@ -982,23 +983,31 @@ async function handleClosures(): Promise<string | null> {
     if ((data.sent ?? 0) > 0) {
       msg = `✅ Sent ${data.sent} new closure alert(s) above.`;
     } else if (feed.length === 0) {
-      msg = `No new closures for Taipei/New Taipei/Taoyuan right now. Feed is empty.`;
+      msg = `No closures in the feed right now.`;
     } else {
+      // English-first: the whole point of translating is readability, so
+      // lead with it and drop the boilerplate Chinese phone/agency line —
+      // it's noise here. The full original still goes out on the real
+      // Telegram alert when something actually fires.
       msg =
-        `No new closures for Taipei/New Taipei/Taoyuan right now. ` +
-        `Currently in the feed (${feed.length}):\n\n` +
+        `No new closures for Taipei/New Taipei/Taoyuan. ${feed.length} in the feed:\n\n` +
         feed
           .map((f) => {
-            const flag = f.tracked ? (f.expired ? "⏱ expired" : "✓ tracked, not new") : "not tracked";
-            const localityLine = f.locality_en
-              ? `<b>${escapeHtml(f.locality)}</b> (${escapeHtml(f.locality_en)}) — ${flag}`
-              : `<b>${escapeHtml(f.locality)}</b> (${flag})`;
-            const messageLine = f.message_en
-              ? `  ${escapeHtml(f.message)}\n  ${escapeHtml(f.message_en)}`
-              : `  ${escapeHtml(f.message)}`;
-            return `• ${localityLine}\n${messageLine}`;
+            const dot = !f.tracked ? "⚪" : f.expired ? "⏱" : "🔵";
+            const status = !f.tracked
+              ? "not tracked"
+              : f.expired
+              ? "expired"
+              : f.already_sent
+              ? "active, already sent"
+              : "active";
+            const name = f.locality_en
+              ? `${escapeHtml(f.locality_en)} (${escapeHtml(f.locality)})`
+              : escapeHtml(f.locality);
+            const summary = escapeHtml(f.message_en || f.message);
+            return `${dot} <b>${name}</b> — ${status}\n${summary}`;
           })
-          .join("\n");
+          .join("\n\n");
     }
     await sendTelegram(msg);
     return `Closure check: ${data.sent ?? 0} sent`;

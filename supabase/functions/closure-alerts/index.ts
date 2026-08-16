@@ -71,11 +71,14 @@ Deno.serve(async (req) => {
       )
     );
 
+    // Fetched for the whole feed (not just candidates) so the /closures
+    // summary can correctly report "already sent" vs. "not yet due" per
+    // entry, instead of guessing from tracked/expired alone.
+    const seen = await fetchSeenIds(alerts.map((a) => a.id));
+
     const candidates = alerts.filter(
       (a) => isTracked(a.locality) && (!a.expires || a.expires > now)
     );
-
-    const seen = await fetchSeenIds(candidates.map((a) => a.id));
     const fresh = candidates.filter((a) => !seen.has(a.id));
 
     let sent = 0;
@@ -108,6 +111,7 @@ Deno.serve(async (req) => {
             tracked: isTracked(a.locality),
             expires: a.expires ? a.expires.toISOString() : null,
             expired: a.expires ? a.expires <= now : false,
+            already_sent: seen.has(a.id),
           };
         }),
       }),
