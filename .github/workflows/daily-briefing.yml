@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: '0 23 * * *'  # 7:00 AM Taipei (UTC+8)
   workflow_dispatch:
+    inputs:
+      force:
+        description: "Resend even if today's briefing already went out"
+        type: boolean
+        default: false
 
 jobs:
   briefing:
@@ -14,9 +19,10 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          FORCE: ${{ inputs.force || 'false' }}
         run: |
           curl -fsS -X POST \
             "${SUPABASE_URL}/functions/v1/daily-briefing" \
             -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
             -H "Content-Type: application/json" \
-            -d '{}'
+            -d "{\"force\": ${FORCE}}"
