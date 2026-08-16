@@ -964,19 +964,33 @@ async function handleClosures(): Promise<string | null> {
       return null;
     }
     const data = await res.json().catch(() => null) as
-      { checked?: number; tracked_active?: number; sent?: number } | null;
+      {
+        checked?: number; tracked_active?: number; sent?: number;
+        feed?: { locality: string; message: string; tracked: boolean; expires: string | null; expired: boolean }[];
+      } | null;
     if (!data) {
       await sendTelegram("Closure check ran, but the response couldn't be read.");
       return null;
     }
+
+    const feed = data.feed ?? [];
+    let msg: string;
     if ((data.sent ?? 0) > 0) {
-      await sendTelegram(`✅ Sent ${data.sent} new closure alert(s) above.`);
+      msg = `✅ Sent ${data.sent} new closure alert(s) above.`;
+    } else if (feed.length === 0) {
+      msg = `No new closures for Taipei/New Taipei/Taoyuan right now. Feed is empty.`;
     } else {
-      await sendTelegram(
+      msg =
         `No new closures for Taipei/New Taipei/Taoyuan right now. ` +
-        `(${data.tracked_active ?? 0} active in tracked cities, ${data.checked ?? 0} total in the feed)`
-      );
+        `Currently in the feed (${feed.length}):\n\n` +
+        feed
+          .map((f) => {
+            const flag = f.tracked ? (f.expired ? "⏱ expired" : "✓ tracked, not new") : "not tracked";
+            return `• <b>${escapeHtml(f.locality)}</b> (${flag})\n  ${escapeHtml(f.message)}`;
+          })
+          .join("\n");
     }
+    await sendTelegram(msg);
     return `Closure check: ${data.sent ?? 0} sent`;
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);

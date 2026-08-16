@@ -88,6 +88,16 @@ Deno.serve(async (req) => {
         tracked_active: candidates.length,
         new: fresh.length,
         sent,
+        // Everything currently in the feed, tracked or not, expired or not —
+        // lets a caller (e.g. the /closures Telegram command) show what's
+        // actually there instead of just a count.
+        feed: alerts.map((a) => ({
+          locality: a.locality,
+          message: a.message,
+          tracked: isTracked(a.locality),
+          expires: a.expires ? a.expires.toISOString() : null,
+          expired: a.expires ? a.expires <= now : false,
+        })),
       }),
       { status: 200, headers: { "Content-Type": "application/json" } }
     );
