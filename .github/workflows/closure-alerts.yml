@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: '*/15 * * * *'  # every 15 minutes
   workflow_dispatch:
+    inputs:
+      test:
+        description: "Send a synthetic Taipei test alert instead of polling the real feed"
+        type: boolean
+        default: false
 
 jobs:
   poll:
@@ -14,9 +19,10 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          TEST: ${{ inputs.test || 'false' }}
         run: |
           curl -fsS -X POST \
             "${SUPABASE_URL}/functions/v1/closure-alerts" \
             -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
             -H "Content-Type: application/json" \
-            -d '{}'
+            -d "{\"test\": ${TEST}}"

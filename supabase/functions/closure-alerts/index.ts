@@ -34,9 +34,28 @@ function formatAlert(a: ClosureAlert): string {
   return parts.join("\n");
 }
 
-Deno.serve(async (_req) => {
+// Injects one synthetic alert instead of fetching the real feed, so
+// end-to-end delivery (Telegram formatting, dedup) can be verified without
+// waiting for an actual typhoon. Uses a fixed id, so a second {"test":true}
+// call correctly reports "new":0 — proving dedup works too.
+function makeTestAlert(): ClosureAlert {
+  const now = new Date();
+  return {
+    id: "test_manual_alert",
+    locality: "臺北市",
+    message: "這是手動觸發的測試訊息，用於驗證 Telegram 通知功能是否正常運作。",
+    link: "",
+    effective: now,
+    expires: new Date(now.getTime() + 3600_000),
+  };
+}
+
+Deno.serve(async (req) => {
   try {
-    const alerts = await fetchClosureAlerts();
+    let body: { test?: boolean } = {};
+    try { body = await req.json(); } catch { /* empty body is fine */ }
+
+    const alerts = body.test ? [makeTestAlert()] : await fetchClosureAlerts();
     const now = new Date();
 
     const candidates = alerts.filter(
