@@ -1060,21 +1060,21 @@ async function handleAudit(): Promise<string | null> {
 
 async function handleSyncCommands(): Promise<string | null> {
   const commands = [
-    { command: "brief", description: "Get the news briefing now" },
-    { command: "news", description: "Same as /brief" },
-    { command: "drafts", description: "List pending draft replies" },
-    { command: "approve", description: "Approve oldest draft reply" },
-    { command: "edit", description: "Replace draft — /edit [id] <text>" },
-    { command: "update", description: "Update content — /update bio|social|status" },
     { command: "add", description: "Add content — /add project|skill" },
-    { command: "remove", description: "Remove content — /remove project|skill" },
-    { command: "list", description: "View content — /list projects|skills" },
-    { command: "darkmode", description: "Toggle theme — /darkmode on|off" },
     { command: "announce", description: "Site banner — /announce <msg> --flash 20s" },
-    { command: "nextproject", description: "What to build next (add 'raw' for the gap analysis)" },
+    { command: "approve", description: "Approve oldest draft reply" },
     { command: "audit", description: "Repo documentation audit" },
+    { command: "brief", description: "Get the news briefing now" },
     { command: "closures", description: "Check Taipei/New Taipei/Taoyuan closures now" },
+    { command: "darkmode", description: "Toggle theme — /darkmode on|off" },
+    { command: "drafts", description: "List pending draft replies" },
+    { command: "edit", description: "Replace draft — /edit [id] <text>" },
+    { command: "list", description: "View content — /list projects|skills" },
+    { command: "news", description: "Same as /brief" },
+    { command: "nextproject", description: "What to build next (add 'raw' for the gap analysis)" },
+    { command: "remove", description: "Remove content — /remove project|skill" },
     { command: "synccommands", description: "Refresh this command menu" },
+    { command: "update", description: "Update content — /update bio|social|status" },
   ];
   const res = await fetch(
     `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setMyCommands`,
