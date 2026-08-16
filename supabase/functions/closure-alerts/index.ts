@@ -2,6 +2,7 @@ import "@supabase/functions-js/edge-runtime.d.ts";
 import { fetchClosureAlerts, ClosureAlert } from "./lib/ncdr.ts";
 import { fetchSeenIds, markSeen } from "./lib/db.ts";
 import { sendTelegram, escapeHtml } from "./lib/telegram.ts";
+import { translateAlert } from "./lib/groq.ts";
 
 // Only these cities trigger a Telegram alert. Match is by prefix so e.g.
 // "桃園市復興區" (a district within Taoyuan) still matches "桃園市".
@@ -22,15 +23,20 @@ function formatTaipeiTime(d: Date): string {
   }).format(d);
 }
 
-function formatAlert(a: ClosureAlert): string {
+async function formatAlert(a: ClosureAlert): Promise<string> {
+  const translation = await translateAlert(a.locality, a.message);
+
   const parts = [
-    `⚠️ <b>停班停課通知</b>`,
-    `<b>${escapeHtml(a.locality)}</b>`,
+    `⚠️ <b>停班停課通知</b> / Work &amp; School Closure`,
+    translation
+      ? `<b>${escapeHtml(a.locality)}</b> (${escapeHtml(translation.localityEn)})`
+      : `<b>${escapeHtml(a.locality)}</b>`,
     ``,
     escapeHtml(a.message),
   ];
-  if (a.effective) parts.push(``, `生效：${formatTaipeiTime(a.effective)}`);
-  if (a.expires) parts.push(`有效至：${formatTaipeiTime(a.expires)}`);
+  if (translation) parts.push(``, escapeHtml(translation.messageEn));
+  if (a.effective) parts.push(``, `生效 / Effective：${formatTaipeiTime(a.effective)}`);
+  if (a.expires) parts.push(`有效至 / Expires：${formatTaipeiTime(a.expires)}`);
   return parts.join("\n");
 }
 
@@ -67,7 +73,7 @@ Deno.serve(async (req) => {
 
     let sent = 0;
     for (const alert of fresh) {
-      const ok = await sendTelegram(formatAlert(alert));
+      const ok = await sendTelegram(await formatAlert(alert));
       if (ok) sent++;
       // Mark seen regardless of Telegram delivery outcome — a delivery
       // failure shouldn't cause the same alert to retry forever and spam
