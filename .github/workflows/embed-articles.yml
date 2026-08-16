@@ -2,7 +2,7 @@ name: Embed Articles
 
 on:
   schedule:
-    - cron: '*/30 * * * *'  # every 30 minutes
+    - cron: '10,40 * * * *'  # every 30 minutes, offset from :00/:30 to avoid colliding with daily-briefing's 23:00 UTC run
   workflow_dispatch:
 
 jobs:

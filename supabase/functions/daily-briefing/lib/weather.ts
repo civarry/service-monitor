@@ -70,6 +70,25 @@ function computeRainWindow(times: string[], probs: number[]): string {
   return `Peak rain ${formatHour(peak.hour)} · ${peak.prob}%`;
 }
 
+async function fetchWeatherOnce(url: string): Promise<Weather | null> {
+  const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+  if (!res.ok) return null;
+  const data = await res.json();
+  const d = data.daily;
+  const h = data.hourly;
+  if (!d) return null;
+  const code = d.weathercode?.[0] ?? 0;
+  const rain_window = h ? computeRainWindow(h.time, h.precipitation_probability) : "Forecast unavailable";
+  return {
+    temp_max: d.temperature_2m_max?.[0] ?? 0,
+    temp_min: d.temperature_2m_min?.[0] ?? 0,
+    precip_prob: d.precipitation_probability_max?.[0] ?? 0,
+    code,
+    summary: WMO_LABELS[code] ?? "Mixed",
+    rain_window,
+  };
+}
+
 export async function getTaipeiWeather(): Promise<Weather | null> {
   const url =
     `https://api.open-meteo.com/v1/forecast` +
@@ -77,24 +96,17 @@ export async function getTaipeiWeather(): Promise<Weather | null> {
     `&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weathercode` +
     `&hourly=precipitation_probability` +
     `&timezone=Asia/Taipei&forecast_days=1`;
-  try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
-    if (!res.ok) return null;
-    const data = await res.json();
-    const d = data.daily;
-    const h = data.hourly;
-    if (!d) return null;
-    const code = d.weathercode?.[0] ?? 0;
-    const rain_window = h ? computeRainWindow(h.time, h.precipitation_probability) : "Forecast unavailable";
-    return {
-      temp_max: d.temperature_2m_max?.[0] ?? 0,
-      temp_min: d.temperature_2m_min?.[0] ?? 0,
-      precip_prob: d.precipitation_probability_max?.[0] ?? 0,
-      code,
-      summary: WMO_LABELS[code] ?? "Mixed",
-      rain_window,
-    };
-  } catch {
-    return null;
+
+  // Open-Meteo occasionally times out or blips on the cron's single shot;
+  // one retry recovers most transient failures instead of showing
+  // "Weather unavailable" in the briefing for the whole day.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const weather = await fetchWeatherOnce(url);
+      if (weather) return weather;
+    } catch {
+      // fall through to retry / final null
+    }
   }
+  return null;
 }

@@ -15,6 +15,11 @@ const HEADERS: Record<string, string> = {
   "Content-Type": "application/json",
 };
 
+// Postgres lock contention can hang an un-timed PostgREST call for the whole
+// platform budget before Supabase's gateway kills the function with an opaque
+// 546. Fail fast instead so a stuck query doesn't burn the entire run.
+const DB_TIMEOUT_MS = 20000;
+
 interface PendingArticle {
   id: string;
   title: string;
@@ -40,7 +45,7 @@ async function fetchPending(): Promise<PendingArticle[]> {
   url.searchParams.set("select", "id,title,description");
   url.searchParams.set("order", "briefing_date.desc,published_at.desc.nullslast");
   url.searchParams.set("limit", String(FETCH_LIMIT));
-  const res = await fetch(url.toString(), { headers: HEADERS });
+  const res = await fetch(url.toString(), { headers: HEADERS, signal: AbortSignal.timeout(DB_TIMEOUT_MS) });
   if (!res.ok) {
     throw new Error(`fetchPending: ${res.status} ${await res.text()}`);
   }
@@ -87,6 +92,7 @@ async function persistEmbeddings(
       method: "POST",
       headers: HEADERS,
       body: JSON.stringify({ payload: items }),
+      signal: AbortSignal.timeout(DB_TIMEOUT_MS),
     }
   );
   if (!res.ok) {

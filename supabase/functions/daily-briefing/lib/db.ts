@@ -7,6 +7,11 @@ const HEADERS: Record<string, string> = {
   "Content-Type": "application/json",
 };
 
+// Postgres lock contention (e.g. a concurrent embed-articles write) can hang
+// an un-timed PostgREST call for the entire platform budget before Supabase's
+// own gateway kills the whole function with an opaque 504. Fail fast instead.
+const DB_TIMEOUT_MS = 20000;
+
 export interface ArticleRow {
   title: string;
   description: string;
@@ -34,6 +39,7 @@ export async function upsertArticles(rows: ArticleRow[]): Promise<void> {
       method: "POST",
       headers: { ...HEADERS, Prefer: "resolution=merge-duplicates" },
       body: JSON.stringify(rows),
+      signal: AbortSignal.timeout(DB_TIMEOUT_MS),
     }
   );
   if (!res.ok) throw new Error(`upsertArticles: ${res.status} ${await res.text()}`);
@@ -44,7 +50,7 @@ export async function fetchTodaysArticles(briefingDate: string): Promise<Article
   url.searchParams.set("briefing_date", `eq.${briefingDate}`);
   url.searchParams.set("select", "id,title,description,url,source,category,published_at,briefing_date,embedding,cluster_id");
   url.searchParams.set("order", "published_at.desc.nullslast");
-  const res = await fetch(url.toString(), { headers: HEADERS });
+  const res = await fetch(url.toString(), { headers: HEADERS, signal: AbortSignal.timeout(DB_TIMEOUT_MS) });
   if (!res.ok) throw new Error(`fetchTodaysArticles: ${res.status} ${await res.text()}`);
   const rows = (await res.json()) as ArticleWithId[];
   return rows.map((r) => ({
@@ -59,6 +65,7 @@ export async function bulkSetEmbeddings(items: { id: string; embedding: string }
     method: "POST",
     headers: HEADERS,
     body: JSON.stringify({ payload: items }),
+    signal: AbortSignal.timeout(DB_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`bulkSetEmbeddings: ${res.status} ${await res.text()}`);
 }
@@ -69,6 +76,7 @@ export async function bulkSetClusters(items: { id: string; cluster_id: string }[
     method: "POST",
     headers: HEADERS,
     body: JSON.stringify({ payload: items }),
+    signal: AbortSignal.timeout(DB_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`bulkSetClusters: ${res.status} ${await res.text()}`);
 }
@@ -81,11 +89,12 @@ export async function clearTodaysClusters(briefingDate: string): Promise<void> {
       method: "PATCH",
       headers: HEADERS,
       body: JSON.stringify({ cluster_id: null }),
+      signal: AbortSignal.timeout(DB_TIMEOUT_MS),
     }
   );
   await fetch(
     `${SUPABASE_URL}/rest/v1/clusters?briefing_date=eq.${briefingDate}`,
-    { method: "DELETE", headers: HEADERS }
+    { method: "DELETE", headers: HEADERS, signal: AbortSignal.timeout(DB_TIMEOUT_MS) }
   );
 }
 
@@ -104,6 +113,7 @@ export async function insertClusters(rows: ClusterRow[]): Promise<void> {
     method: "POST",
     headers: HEADERS,
     body: JSON.stringify(rows),
+    signal: AbortSignal.timeout(DB_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`insertClusters: ${res.status} ${await res.text()}`);
 }
@@ -113,7 +123,7 @@ export async function getBriefingForDate(briefing_date: string): Promise<{ sent_
   url.searchParams.set("briefing_date", `eq.${briefing_date}`);
   url.searchParams.set("select", "sent_at");
   url.searchParams.set("limit", "1");
-  const res = await fetch(url.toString(), { headers: HEADERS });
+  const res = await fetch(url.toString(), { headers: HEADERS, signal: AbortSignal.timeout(DB_TIMEOUT_MS) });
   if (!res.ok) return null;
   const rows = await res.json();
   return rows[0] || null;
@@ -135,6 +145,7 @@ export async function saveBriefing(
         message_text,
         sent_at: new Date().toISOString(),
       }),
+      signal: AbortSignal.timeout(DB_TIMEOUT_MS),
     }
   );
   if (!res.ok) throw new Error(`saveBriefing: ${res.status} ${await res.text()}`);

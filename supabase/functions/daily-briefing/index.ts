@@ -13,21 +13,6 @@ import {
 import { digestCategory, CategoryDigest } from "./lib/groq.ts";
 import { sendTelegram, escapeHtml } from "./lib/telegram.ts";
 
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-
-async function triggerEmbedJob(): Promise<void> {
-  await fetch(`${SUPABASE_URL}/functions/v1/embed-articles`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: "{}",
-    signal: AbortSignal.timeout(6000),
-  });
-}
-
 function taipeiDate(): string {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Taipei",
@@ -407,20 +392,20 @@ Deno.serve(async (req) => {
     const deduped = dedupeByUrl(rawArticles);
     if (deduped.length > 0) await upsertArticles(deduped);
 
-    // Fire-and-forget: kick the embed-articles function so freshly upserted
-    // rows get vectors as soon as possible. Capped at 6s wall-clock so a slow
-    // Voyage call can't stall the briefing — if it doesn't finish in time,
-    // clustering falls through to Jaccard for the new articles. The /30-min
-    // cron picks up anything missed on the next pass.
-    void triggerEmbedJob().catch(() => {});
-
+    // Embedding freshly upserted rows happens on the independent embed-articles
+    // cron, not triggered from here — clustering falls through to Jaccard for
+    // articles too new to have vectors yet, and the /30-min cron catches up.
     const articles = await fetchTodaysArticles(briefingDate);
 
-    let message = await composeDigest(weather, articles);
-    const hygiene = await repoHygieneLine();
-    if (hygiene) message += `\n\n${hygiene}`;
+    const message = await composeDigest(weather, articles);
     const sent = await sendTelegram(message);
     await saveBriefing(briefingDate, weather, message);
+
+    // Sent as its own message rather than appended to the news digest —
+    // an unrelated repo-maintenance nag doesn't belong in the same bubble
+    // as the morning weather/news briefing.
+    const hygiene = await repoHygieneLine();
+    if (hygiene) await sendTelegram(hygiene);
 
     return new Response(
       JSON.stringify({
