@@ -54,3 +54,10 @@ jobs:
             echo "::error title=daily-briefing::Telegram rejected the message (sent=false)"
             exit 1
           fi
+
+          # The briefing now survives a failed step rather than aborting, and
+          # names what it lost in .degraded. A warning, not a failure: the
+          # briefing did go out, and the reader sees the same note on it.
+          if jq -e 'has("degraded")' "$RESPONSE" >/dev/null; then
+            echo "::warning title=daily-briefing::sent with degraded data — $(jq -r '.degraded | join("; ")' "$RESPONSE" | cut -c1-300)"
+          fi

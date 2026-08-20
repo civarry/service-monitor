@@ -48,8 +48,10 @@ function toPHT(iso: string): string {
 
 // ---------- SUPABASE FUNCTIONS ----------
 
+// messages.id is a uuid, so these are strings. They were annotated as number,
+// which made `deno check` fail on every call site.
 async function updateMessageStatus(
-  messageId: number,
+  messageId: string,
   status: string
 ): Promise<void> {
   const res = await fetch(
@@ -67,7 +69,7 @@ async function updateMessageStatus(
 }
 
 async function claimMessage(
-  messageId: number
+  messageId: string
 ): Promise<Record<string, unknown>[]> {
   const res = await fetch(
     `${SUPABASE_URL}/rest/v1/messages?id=eq.${messageId}&status=eq.pending`,
@@ -85,7 +87,7 @@ async function claimMessage(
 }
 
 async function saveReply(
-  messageId: number,
+  messageId: string,
   replyText: string,
   replyStatus: string
 ): Promise<void> {

@@ -371,15 +371,38 @@ async function repoHygieneLine(): Promise<string | null> {
   }
 }
 
+// A briefing assembled around a failure should say so, in the place the reader
+// actually looks, rather than only in a workflow log.
+function footerFor(message: string, degraded: string[]): string {
+  if (degraded.length === 0) return message;
+  const steps = degraded.map((d) => escapeHtml(d.split(":")[0])).join(", ");
+  return `${message}\n\n<i>⚠️ assembled with degraded data (${steps})</i>`;
+}
+
 Deno.serve(async (req) => {
   const briefingDate = taipeiDate();
 
   let body: { force?: boolean } = {};
   try { body = await req.json(); } catch { /* empty body is fine */ }
 
+  // Every step that is not "compose and send" is best-effort. A transient
+  // Supabase blip used to abort the whole run and replace the briefing with an
+  // error message; the briefing is the product, so anything that can be
+  // survived is survived and recorded here instead.
+  const degraded: string[] = [];
+  const note = (step: string, err: unknown) =>
+    degraded.push(`${step}: ${err instanceof Error ? err.message : String(err)}`);
+
   try {
     if (!body.force) {
-      const existing = await getBriefingForDate(briefingDate);
+      // A dedup check that cannot be completed is not a reason to skip: the
+      // worst case is a duplicate briefing, which beats a silent miss.
+      let existing: { sent_at: string | null } | null = null;
+      try {
+        existing = await getBriefingForDate(briefingDate);
+      } catch (err) {
+        note("dedup check", err);
+      }
       if (existing?.sent_at) {
         return new Response(
           JSON.stringify({
@@ -394,32 +417,74 @@ Deno.serve(async (req) => {
     }
 
     const [weather, rawArticles] = await Promise.all([
-      getTaipeiWeather(),
+      // formatWeather already renders a null weather as "unavailable".
+      getTaipeiWeather().catch((err) => {
+        note("weather", err);
+        return null;
+      }),
       gatherArticles(briefingDate),
     ]);
+
     const deduped = dedupeByUrl(rawArticles);
-    if (deduped.length > 0) await upsertArticles(deduped);
+    if (deduped.length > 0) {
+      try {
+        await upsertArticles(deduped);
+      } catch (err) {
+        note("article upsert", err);
+      }
+    }
 
     // Embedding freshly upserted rows happens on the independent embed-articles
     // cron, not triggered from here — clustering falls through to Jaccard for
     // articles too new to have vectors yet, and the /30-min cron catches up.
-    const articles = await fetchTodaysArticles(briefingDate);
+    //
+    // The stored rows are preferred because they carry ids, embeddings and
+    // cluster ids, so clustering can use vectors rather than Jaccard alone.
+    // When the read fails, today's freshly gathered feed items stand in: a
+    // database outage should cost briefing quality, not the briefing.
+    let articles: ArticleWithId[] = [];
+    try {
+      articles = await fetchTodaysArticles(briefingDate);
+    } catch (err) {
+      note("article read", err);
+    }
+    if (articles.length === 0 && deduped.length > 0) {
+      if (degraded.length > 0) note("source", new Error("composed from live feeds, not the database"));
+      articles = deduped.map((r, i) => ({ ...r, id: `feed-${i}` }));
+    }
+
+    if (articles.length === 0) {
+      throw new Error("no articles available from either the database or the feeds");
+    }
 
     const message = await composeDigest(weather, articles);
-    const sent = await sendTelegram(message);
-    await saveBriefing(briefingDate, weather, message);
+    const sent = await sendTelegram(footerFor(message, degraded));
+
+    // After the send, deliberately: failing to record a briefing that did go
+    // out is a bookkeeping problem, and previously it raised a "Briefing
+    // error" alert for a briefing the reader had already received.
+    try {
+      await saveBriefing(briefingDate, weather, message);
+    } catch (err) {
+      note("briefing save", err);
+    }
 
     // Sent as its own message rather than appended to the news digest —
     // an unrelated repo-maintenance nag doesn't belong in the same bubble
     // as the morning weather/news briefing.
-    const hygiene = await repoHygieneLine();
-    if (hygiene) await sendTelegram(hygiene);
+    try {
+      const hygiene = await repoHygieneLine();
+      if (hygiene) await sendTelegram(hygiene);
+    } catch (err) {
+      note("repo hygiene", err);
+    }
 
     return new Response(
       JSON.stringify({
         sent,
         briefing_date: briefingDate,
         article_count: articles.length,
+        degraded: degraded.length > 0 ? degraded : undefined,
       }),
       { status: 200, headers: { "Content-Type": "application/json" } }
     );

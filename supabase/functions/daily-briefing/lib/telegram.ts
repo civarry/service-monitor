@@ -20,6 +20,9 @@ export async function sendTelegram(text: string): Promise<boolean> {
         parse_mode: "HTML",
         disable_web_page_preview: true,
       }),
+      // Unbounded before: a hung Telegram call could burn the whole platform
+      // budget and take the briefing with it.
+      signal: AbortSignal.timeout(15000),
     }
   );
   return res.ok;
