@@ -229,12 +229,10 @@ function pickTopClusters(
 }
 
 function headlineLinks(items: ArticleWithId[], labels: string[]): string {
-  // No bullet glyph: these render inside a blockquote, whose left bar already
-  // supplies the list affordance. A "• " on top of the bar reads as clutter.
   return items
     .map((it, i) => {
       const text = (labels[i] && labels[i].trim()) || it.title;
-      return `<a href="${escapeHtml(it.url)}">${escapeHtml(text)}</a>`;
+      return `▸ <a href="${escapeHtml(it.url)}">${escapeHtml(text)}</a>`;
     })
     .join("\n");
 }
@@ -251,19 +249,17 @@ function formatWeather(w: Weather | null): string {
   ].join("\n");
 }
 
-// Both the synthesis and the headline list go in expandable blockquotes so the
-// message arrives compact and each section opens on tap. Telegram only draws
-// the expand affordance once a quote exceeds a few lines, so short sections
-// degrade to a plain quote rather than showing a useless "expand".
+// Everything stays visible: this is a glance-and-go morning briefing, so
+// nothing is hidden behind a tap. Underline on the header does the work a rule
+// would (Telegram HTML has no <hr>), and a plain blockquote sets the synthesis
+// apart from the link list without collapsing it.
 function section(emoji: string, label: string, digest: CategoryDigest, items: ArticleWithId[]): string {
-  const header = `${emoji} <b>${escapeHtml(label.toUpperCase())}</b>`;
+  const header = `<b><u>${emoji} ${escapeHtml(label.toUpperCase())}</u></b>`;
   if (items.length === 0) return `${header}\n<i>nothing today</i>`;
 
   const parts = [header];
-  if (digest.summary) {
-    parts.push(`<blockquote expandable>${escapeHtml(digest.summary)}</blockquote>`, ``);
-  }
-  parts.push(`<blockquote expandable>${headlineLinks(items, digest.labels)}</blockquote>`);
+  if (digest.summary) parts.push(`<blockquote>${escapeHtml(digest.summary)}</blockquote>`);
+  parts.push(headlineLinks(items, digest.labels));
   return parts.join("\n");
 }
 

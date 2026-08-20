@@ -25,7 +25,7 @@ function formatTaipeiTime(d: Date): string {
 
 function formatAlert(a: ClosureAlert, translation: Translation | null): string {
   const parts = [
-    `⚠️ <b>停班停課 / CLOSURE</b>`,
+    `<b><u>⚠️ 停班停課 / CLOSURE</u></b>`,
     translation
       ? `<b>${escapeHtml(a.locality)}</b> · ${escapeHtml(translation.localityEn)}`
       : `<b>${escapeHtml(a.locality)}</b>`,
@@ -33,11 +33,12 @@ function formatAlert(a: ClosureAlert, translation: Translation | null): string {
   ];
 
   // Chinese original and English rendering share one quote block: they are the
-  // same notice, and splitting them into two blocks reads as two alerts.
+  // same notice, and splitting them into two blocks reads as two alerts. Not
+  // expandable — a closure alert is exactly the thing you read at a glance.
   const body = translation
     ? `${escapeHtml(a.message)}\n\n${escapeHtml(translation.messageEn)}`
     : escapeHtml(a.message);
-  parts.push(`<blockquote expandable>${body}</blockquote>`);
+  parts.push(`<blockquote>${body}</blockquote>`);
 
   const window: string[] = [];
   if (a.effective) window.push(`Effective ${formatTaipeiTime(a.effective)}`);

@@ -47,10 +47,10 @@ jobs:
           TODAY=$(TZ="Asia/Manila" date "+%Y-%m-%d")
 
           if [ "$TOTAL" = "?" ]; then
-            HEAD="⚠️ <b>SYSTEM STATUS</b>"
+            HEAD="<b><u>⚠️ SYSTEM STATUS</u></b>"
             BODY="Supabase did not respond · counts unavailable"
           else
-            HEAD="✅ <b>SYSTEM STATUS</b>"
+            HEAD="<b><u>✅ SYSTEM STATUS</u></b>"
             BODY="Messages · ${TOTAL} total · ${PENDING} pending"
           fi
 

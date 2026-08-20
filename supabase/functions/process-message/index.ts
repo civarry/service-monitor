@@ -263,19 +263,17 @@ function formatNotification(msg: MessageRecord, draft?: string | null): string {
   const email = escapeHtml(msg.email || "");
   const message = escapeHtml(msg.message || "");
 
-  // Body and draft go in expandable quotes so a long enquiry does not push the
-  // /approve and /edit commands off the visible part of the message.
   let text =
-    `📬 <b>NEW MESSAGE</b>\n` +
+    `<b><u>📬 NEW MESSAGE</u></b>\n` +
     `<b>${name}</b> · ${email}\n\n` +
-    `<blockquote expandable>${message}</blockquote>\n\n` +
+    `<blockquote>${message}</blockquote>\n\n` +
     `<i>Received ${timestamp}</i>`;
 
   if (draft) {
     const shortId = (msg.id ?? "").replace(/-/g, "");
     text +=
-      `\n\n✍️ <b>AI DRAFT</b>\n` +
-      `<blockquote expandable>${escapeHtml(draft)}</blockquote>\n\n` +
+      `\n\n<b><u>✍️ AI DRAFT</u></b>\n` +
+      `<blockquote>${escapeHtml(draft)}</blockquote>\n\n` +
       `/approve_${shortId} — send this reply\n` +
       `/edit_${shortId} your version — send custom reply`;
   }
