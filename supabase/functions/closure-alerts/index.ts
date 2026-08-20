@@ -25,16 +25,25 @@ function formatTaipeiTime(d: Date): string {
 
 function formatAlert(a: ClosureAlert, translation: Translation | null): string {
   const parts = [
-    `⚠️ <b>停班停課通知</b> / Work &amp; School Closure`,
+    `⚠️ <b>停班停課 / CLOSURE</b>`,
     translation
-      ? `<b>${escapeHtml(a.locality)}</b> (${escapeHtml(translation.localityEn)})`
+      ? `<b>${escapeHtml(a.locality)}</b> · ${escapeHtml(translation.localityEn)}`
       : `<b>${escapeHtml(a.locality)}</b>`,
     ``,
-    escapeHtml(a.message),
   ];
-  if (translation) parts.push(``, escapeHtml(translation.messageEn));
-  if (a.effective) parts.push(``, `生效 / Effective：${formatTaipeiTime(a.effective)}`);
-  if (a.expires) parts.push(`有效至 / Expires：${formatTaipeiTime(a.expires)}`);
+
+  // Chinese original and English rendering share one quote block: they are the
+  // same notice, and splitting them into two blocks reads as two alerts.
+  const body = translation
+    ? `${escapeHtml(a.message)}\n\n${escapeHtml(translation.messageEn)}`
+    : escapeHtml(a.message);
+  parts.push(`<blockquote expandable>${body}</blockquote>`);
+
+  const window: string[] = [];
+  if (a.effective) window.push(`Effective ${formatTaipeiTime(a.effective)}`);
+  if (a.expires) window.push(`Expires ${formatTaipeiTime(a.expires)}`);
+  if (window.length > 0) parts.push(``, `<i>${window.join(" · ")}</i>`);
+
   return parts.join("\n");
 }
 

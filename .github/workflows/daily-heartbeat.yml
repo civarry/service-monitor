@@ -18,7 +18,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           # Get total message count
-          TOTAL=$(curl -s -D /tmp/headers -o /dev/null \
+          TOTAL=$(curl -s --max-time 20 -D /tmp/headers -o /dev/null \
             "${SUPABASE_URL}/rest/v1/messages?select=id&limit=0" \
             -H "apikey: ${SUPABASE_SERVICE_KEY}" \
             -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
@@ -27,7 +27,7 @@ jobs:
             grep -i 'content-range' /tmp/headers | sed 's/.*\///' | tr -d '\r\n' || echo "?")
 
           # Get pending message count
-          PENDING=$(curl -s -D /tmp/headers -o /dev/null \
+          PENDING=$(curl -s --max-time 20 -D /tmp/headers -o /dev/null \
             "${SUPABASE_URL}/rest/v1/messages?select=id&status=eq.pending&limit=0" \
             -H "apikey: ${SUPABASE_SERVICE_KEY}" \
             -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
@@ -35,8 +35,22 @@ jobs:
             -H "Prefer: count=exact" && \
             grep -i 'content-range' /tmp/headers | sed 's/.*\///' | tr -d '\r\n' || echo "?")
 
-          NOW=$(TZ="Asia/Manila" date "+%Y-%m-%d %H:%M:%S PHT")
+          # `|| echo "?"` above cannot fire: `tr` closes the pipeline with
+          # status 0 even when grep matched nothing, so an unreachable Supabase
+          # yielded an empty string and a blank line in the report. Default here.
+          TOTAL=${TOTAL:-?}
+          PENDING=${PENDING:-?}
+
+          NOW=$(TZ="Asia/Manila" date "+%Y-%m-%d %H:%M %Z")
           TODAY=$(TZ="Asia/Manila" date "+%Y-%m-%d")
+
+          if [ "$TOTAL" = "?" ]; then
+            HEAD="⚠️ <b>SYSTEM STATUS</b>"
+            BODY="Supabase did not respond · counts unavailable"
+          else
+            HEAD="✅ <b>SYSTEM STATUS</b>"
+            BODY="Messages · ${TOTAL} total · ${PENDING} pending"
+          fi
 
           # Send Telegram message
           curl -s -X POST \
@@ -44,7 +58,7 @@ jobs:
             -H "Content-Type: application/json" \
             -d "{
               \"chat_id\": \"${TELEGRAM_CHAT_ID}\",
-              \"text\": \"<b>Daily Status Report</b>\n\n<b>Status:</b> Online\n<b>Time:</b> ${NOW}\n<b>Total messages:</b> ${TOTAL}\n<b>Pending:</b> ${PENDING}\n\n<i>civarry.github.io is running.</i>\",
+              \"text\": \"${HEAD}\n<i>${NOW}</i>\n\n<blockquote>${BODY}</blockquote>\n\n<i>civarry.github.io · backend heartbeat</i>\",
               \"parse_mode\": \"HTML\"
             }"
 
