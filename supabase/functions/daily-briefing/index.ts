@@ -375,8 +375,13 @@ async function repoHygieneLine(): Promise<string | null> {
 // actually looks, rather than only in a workflow log.
 function footerFor(message: string, degraded: string[]): string {
   if (degraded.length === 0) return message;
-  const steps = degraded.map((d) => escapeHtml(d.split(":")[0])).join(", ");
-  return `${message}\n\n<i>⚠️ assembled with degraded data (${steps})</i>`;
+  // Step names only, capped: the reader needs to know the briefing may be
+  // incomplete, not to read a stack of error strings. Full detail goes to the
+  // .degraded field in the response, which the workflow logs.
+  const steps = degraded.map((d) => d.split(":")[0]);
+  const shown = escapeHtml(steps.slice(0, 3).join(", "));
+  const more = steps.length > 3 ? ` +${steps.length - 3} more` : "";
+  return `${message}\n\n<i>⚠️ assembled with degraded data: ${shown}${more}</i>`;
 }
 
 Deno.serve(async (req) => {
