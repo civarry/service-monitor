@@ -41,7 +41,9 @@ jobs:
           TOTAL=${TOTAL:-?}
           PENDING=${PENDING:-?}
 
-          NOW=$(TZ="Asia/Manila" date "+%Y-%m-%d %H:%M %Z")
+          # Literal "PHT", not %Z: glibc renders Asia/Manila as "PST", which
+          # reads as US Pacific in a report that is actually Manila time.
+          NOW=$(TZ="Asia/Manila" date "+%Y-%m-%d %H:%M PHT")
           TODAY=$(TZ="Asia/Manila" date "+%Y-%m-%d")
 
           if [ "$TOTAL" = "?" ]; then
