@@ -60,10 +60,11 @@ jobs:
             -d "$(jq -n \
               --arg prompt "$PROMPT" \
               '{
-                "model": "llama-3.1-8b-instant",
+                "model": "openai/gpt-oss-20b",
                 "messages": [{"role": "user", "content": $prompt}],
-                "max_tokens": 100,
-                "temperature": 0.7
+                "max_tokens": 1200,
+                "temperature": 0.7,
+                "reasoning_effort": "low"
               }')" | jq -r '.choices[0].message.content // "System operational."')
 
           # Write status.json

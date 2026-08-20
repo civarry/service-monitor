@@ -22,7 +22,7 @@ SUPABASE_SERVICE_KEY = st.secrets["SUPABASE_SERVICE_KEY"]
 TELEGRAM_BOT_TOKEN = st.secrets["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHAT_ID = st.secrets["TELEGRAM_CHAT_ID"]
 GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
-GROQ_MODEL = "llama-3.1-8b-instant"
+GROQ_MODEL = "openai/gpt-oss-20b"  # Groq retired the Llama 3.x line
 SMTP_EMAIL = st.secrets["SMTP_EMAIL"]
 SMTP_APP_PASSWORD = st.secrets["SMTP_APP_PASSWORD"]
 SMTP_DISPLAY_NAME = "CJ Carito"
@@ -388,8 +388,9 @@ def generate_reply_draft(name, email, message_text):
             json={
                 "model": GROQ_MODEL,
                 "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 200,
-                "temperature": 0.7
+                "max_tokens": 1500,
+                "temperature": 0.7,
+                "reasoning_effort": "low"
             },
             timeout=15
         )

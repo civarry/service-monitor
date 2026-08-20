@@ -7,7 +7,9 @@ const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const TELEGRAM_BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN")!;
 const TELEGRAM_CHAT_ID = Deno.env.get("TELEGRAM_CHAT_ID")!;
 const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY")!;
-const GROQ_MODEL = "llama-3.1-8b-instant";
+// Groq retired llama-3.1-8b-instant. Reasoning tokens count against
+// max_tokens on gpt-oss, so the budget below covers reasoning + reply.
+const GROQ_MODEL = "openai/gpt-oss-20b";
 
 const HEADERS: Record<string, string> = {
   apikey: SUPABASE_SERVICE_KEY,
@@ -198,8 +200,9 @@ async function generateReplyDraft(
         body: JSON.stringify({
           model: GROQ_MODEL,
           messages: [{ role: "user", content: prompt }],
-          max_tokens: 200,
+          max_tokens: 1500,
           temperature: 0.7,
+          reasoning_effort: "low",
         }),
         signal: AbortSignal.timeout(15000),
       }

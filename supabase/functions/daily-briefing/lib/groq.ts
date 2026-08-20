@@ -1,6 +1,9 @@
 const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY")!;
-const FAST_MODEL = "llama-3.1-8b-instant";
-const SMART_MODEL = "llama-3.3-70b-versatile";
+// Groq retired the Llama 3.x line; these are the current replacements. Both are
+// reasoning models, so reasoning tokens are billed against max_tokens — the
+// budgets below are sized for reasoning + output, not output alone.
+const FAST_MODEL = "openai/gpt-oss-20b";
+const SMART_MODEL = "openai/gpt-oss-120b";
 
 // Skip prose synthesis below this threshold — too thin to summarize without
 // hallucinating filler or meta-narrating about gaps. Bullets alone suffice.
@@ -41,7 +44,8 @@ function bulletList(articles: SummarizableArticle[]): string {
 async function groqJSON(
   model: string,
   prompt: string,
-  maxTokens: number
+  maxTokens: number,
+  reasoningEffort: "low" | "medium" = "low"
 ): Promise<Record<string, unknown> | null> {
   try {
     const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -55,6 +59,7 @@ async function groqJSON(
         messages: [{ role: "user", content: prompt }],
         max_tokens: maxTokens,
         temperature: 0.2,
+        reasoning_effort: reasoningEffort,
         response_format: { type: "json_object" },
       }),
       signal: AbortSignal.timeout(20000),
@@ -81,7 +86,7 @@ async function generateLabels(
     `- No trailing punctuation, no quotes, no hashtags.\n` +
     `- Same count and order as headlines above.`;
 
-  const parsed = await groqJSON(FAST_MODEL, prompt, 300);
+  const parsed = await groqJSON(FAST_MODEL, prompt, 1500);
   return Array.isArray(parsed?.labels)
     ? (parsed!.labels as unknown[])
         .map((l) => String(l).trim())
@@ -121,7 +126,7 @@ async function writeSummary(
     `- If a headline lacks a concrete fact, silently omit it rather than apologizing for the gap or inventing one.\n` +
     `- No preamble like "Today's news...". No hashtags, no emoji.`;
 
-  const parsed = await groqJSON(SMART_MODEL, prompt, 500);
+  const parsed = await groqJSON(SMART_MODEL, prompt, 2500, "medium");
   return typeof parsed?.summary === "string" ? parsed.summary.trim() : null;
 }
 

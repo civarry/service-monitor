@@ -385,7 +385,10 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 
 [functions.process-message]
 enabled = true
-verify_jwt = true
+# Must stay false: the pg_cron job that invokes this sends no Authorization
+# header (net.http_post with Content-Type only). Flipping this to true 401s
+# the whole contact-form pipeline.
+verify_jwt = false
 import_map = "./functions/process-message/deno.json"
 # Uncomment to specify a custom file path to the entrypoint.
 # Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
@@ -416,3 +419,11 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/embed-articles/deno.json"
 entrypoint = "./functions/embed-articles/index.ts"
+
+[functions.closure-alerts]
+enabled = true
+# Unlike the others this one keeps JWT verification on: its only caller is the
+# closure-alerts GitHub Action, which does send the service-role bearer.
+verify_jwt = true
+import_map = "./functions/closure-alerts/deno.json"
+entrypoint = "./functions/closure-alerts/index.ts"

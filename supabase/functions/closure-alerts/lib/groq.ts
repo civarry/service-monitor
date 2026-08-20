@@ -1,5 +1,7 @@
 const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY")!;
-const FAST_MODEL = "llama-3.1-8b-instant";
+// Groq retired llama-3.1-8b-instant. gpt-oss-20b is a reasoning model, so
+// reasoning tokens count against max_tokens — hence the larger budget.
+const FAST_MODEL = "openai/gpt-oss-20b";
 
 export interface Translation {
   localityEn: string;
@@ -26,8 +28,9 @@ export async function translateAlert(locality: string, message: string): Promise
       body: JSON.stringify({
         model: FAST_MODEL,
         messages: [{ role: "user", content: prompt }],
-        max_tokens: 150,
+        max_tokens: 1000,
         temperature: 0.1,
+        reasoning_effort: "low",
         response_format: { type: "json_object" },
       }),
       signal: AbortSignal.timeout(10000),
