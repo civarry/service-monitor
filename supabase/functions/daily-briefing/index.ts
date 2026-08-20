@@ -11,7 +11,7 @@ import {
   ArticleWithId,
 } from "./lib/db.ts";
 import { digestCategory, CategoryDigest } from "./lib/groq.ts";
-import { sendTelegram, escapeHtml } from "./lib/telegram.ts";
+import { sendTelegram, escapeHtml, LinkButton } from "./lib/telegram.ts";
 
 function taipeiDate(): string {
   return new Intl.DateTimeFormat("en-CA", {
@@ -228,13 +228,17 @@ function pickTopClusters(
   return clusterArticles(inCategory).slice(0, n);
 }
 
-function headlineLinks(items: ArticleWithId[], labels: string[]): string {
-  return items
-    .map((it, i) => {
-      const text = (labels[i] && labels[i].trim()) || it.title;
-      return `▸ <a href="${escapeHtml(it.url)}">${escapeHtml(text)}</a>`;
-    })
-    .join("\n");
+// Plain text, deliberately unescaped: these become inline keyboard button
+// labels, and Telegram renders button text literally.
+function headlineButtons(items: ArticleWithId[], labels: string[]): LinkButton[] {
+  return items.map((it, i) => {
+    // Labels are 3-5 word phrases, but when Groq is down this falls back to the
+    // raw headline, which the articles table stores at up to 500 chars. A
+    // button that long wraps into an unreadable slab, so cap it.
+    const raw = (labels[i] && labels[i].trim()) || it.title;
+    const text = raw.length > 56 ? `${raw.slice(0, 55).trimEnd()}…` : raw;
+    return { text, url: it.url };
+  });
 }
 
 function formatWeather(w: Weather | null): string {
@@ -249,18 +253,27 @@ function formatWeather(w: Weather | null): string {
   ].join("\n");
 }
 
-// Everything stays visible: this is a glance-and-go morning briefing, so
-// nothing is hidden behind a tap. Underline on the header does the work a rule
-// would (Telegram HTML has no <hr>), and a plain blockquote sets the synthesis
-// apart from the link list without collapsing it.
-function section(emoji: string, label: string, digest: CategoryDigest, items: ArticleWithId[]): string {
+// One card per section. An inline keyboard attaches to the bottom of a
+// message, so a single combined message could only ever carry one undivided
+// block of buttons — splitting the sections is what lets each headline sit
+// under the section it belongs to.
+interface Card {
+  text: string;
+  buttons?: LinkButton[];
+}
+
+function sectionCard(
+  emoji: string,
+  label: string,
+  digest: CategoryDigest,
+  items: ArticleWithId[]
+): Card {
   const header = `<b><u>${emoji} ${escapeHtml(label.toUpperCase())}</u></b>`;
-  if (items.length === 0) return `${header}\n<i>nothing today</i>`;
+  if (items.length === 0) return { text: `${header}\n<i>nothing today</i>` };
 
   const parts = [header];
   if (digest.summary) parts.push(`<blockquote>${escapeHtml(digest.summary)}</blockquote>`);
-  parts.push(headlineLinks(items, digest.labels));
-  return parts.join("\n");
+  return { text: parts.join("\n"), buttons: headlineButtons(items, digest.labels) };
 }
 
 // Below this, the TW↔PH section is hidden entirely (header + lonely bullet
@@ -301,7 +314,7 @@ function withClusterBadges(
 async function composeDigest(
   weather: Weather | null,
   rows: ArticleWithId[]
-): Promise<string> {
+): Promise<Card[]> {
   const twClusters = pickTopClusters(rows, "tw-news", 5);
   const phClusters = pickTopClusters(rows, "ph-news", 5);
   const twPhClusters = pickTopClusters(rows, "tw-ph", 5);
@@ -319,20 +332,21 @@ async function composeDigest(
       : Promise.resolve<CategoryDigest>({ summary: null, labels: [] }),
   ]);
 
-  const parts: string[] = [
-    `☀️ <b>Good Morning Taipei</b>`,
-    `<i>${escapeHtml(taipeiDateLong())}</i>`,
-    ``,
-    formatWeather(weather),
-    ``,
-    section("🇹🇼", "Taiwan", withClusterBadges(twDigest, twClusters), twClusters.map((c) => c.rep)),
-    ``,
-    section("🇵🇭", "Philippines", withClusterBadges(phDigest, phClusters), phClusters.map((c) => c.rep)),
+  const cards: Card[] = [
+    {
+      text: [
+        `☀️ <b>Good Morning Taipei</b>`,
+        `<i>${escapeHtml(taipeiDateLong())}</i>`,
+        ``,
+        formatWeather(weather),
+      ].join("\n"),
+    },
+    sectionCard("🇹🇼", "Taiwan", withClusterBadges(twDigest, twClusters), twClusters.map((c) => c.rep)),
+    sectionCard("🇵🇭", "Philippines", withClusterBadges(phDigest, phClusters), phClusters.map((c) => c.rep)),
   ];
   if (showTwPh) {
-    parts.push(
-      "",
-      section(
+    cards.push(
+      sectionCard(
         "🤝",
         "Taiwan ↔ Philippines",
         withClusterBadges(twPhDigest, twPhClusters),
@@ -340,7 +354,7 @@ async function composeDigest(
       )
     );
   }
-  return parts.join("\n");
+  return cards;
 }
 
 // One-line repo hygiene nag, appended only when repos fail the
@@ -368,7 +382,8 @@ async function repoHygieneLine(): Promise<string | null> {
 }
 
 // A briefing assembled around a failure should say so, in the place the reader
-// actually looks, rather than only in a workflow log.
+// actually looks, rather than only in a workflow log. Goes on the first card,
+// which is the one that arrives with the notification.
 function footerFor(message: string, degraded: string[]): string {
   if (degraded.length === 0) return message;
   // Step names only, capped: the reader needs to know the briefing may be
@@ -458,8 +473,20 @@ Deno.serve(async (req) => {
       throw new Error("no articles available from either the database or the feeds");
     }
 
-    const message = await composeDigest(weather, articles);
-    const sent = await sendTelegram(footerFor(message, degraded));
+    const cards = await composeDigest(weather, articles);
+    cards[0].text = footerFor(cards[0].text, degraded);
+
+    // Sent in order, and only the first buzzes the phone: a four-card stack
+    // that fires four notifications is worse than the wall of text it replaced.
+    let sent = true;
+    for (const [i, card] of cards.entries()) {
+      const ok = await sendTelegram(card.text, card.buttons, i > 0);
+      if (!ok) sent = false;
+    }
+
+    // Stored joined, since the briefings table holds one message_text per day
+    // and it backs both the dedup check and the /brief history.
+    const message = cards.map((c) => c.text).join("\n\n");
 
     // After the send, deliberately: failing to record a briefing that did go
     // out is a bookkeeping problem, and previously it raised a "Briefing
