@@ -54,9 +54,11 @@ jobs:
           # Ask Groq to generate a brief status summary
           PROMPT="You are a concise system monitor. Given these stats for a contact form service, write a 1-2 sentence status summary. Be natural and brief.\n\nDate: ${TODAY}\nTotal messages: ${TOTAL}\nPending messages: ${PENDING}\nRecent activity: ${LOGS}\n\nRespond with ONLY the summary text, nothing else."
 
-          SUMMARY=$(curl -s "https://api.groq.com/openai/v1/chat/completions" \
+          GROQ_RAW=$(mktemp)
+          curl -s --max-time 60 "https://api.groq.com/openai/v1/chat/completions" \
             -H "Authorization: Bearer ${GROQ_API_KEY}" \
             -H "Content-Type: application/json" \
+            -o "$GROQ_RAW" \
             -d "$(jq -n \
               --arg prompt "$PROMPT" \
               '{
@@ -65,7 +67,20 @@ jobs:
                 "max_tokens": 1200,
                 "temperature": 0.7,
                 "reasoning_effort": "low"
-              }')" | jq -r '.choices[0].message.content // "System operational."')
+              }')"
+
+          SUMMARY=$(jq -r '.choices[0].message.content // empty' "$GROQ_RAW" 2>/dev/null)
+
+          # The old `// "System operational."` default swallowed the response
+          # whole: when Groq retired the Llama models the status line silently
+          # went generic for five days and nothing in the log said why. Keep the
+          # fallback text, but record the reason and fail the job in a later
+          # step — aborting here would skip the commit that keeps Streamlit awake.
+          if [ -z "$SUMMARY" ]; then
+            SUMMARY="System operational."
+            echo "GROQ_FAILED=1" >> "$GITHUB_ENV"
+            echo "::error title=keep-alive::Groq returned no summary: $(jq -rc '.error // .' "$GROQ_RAW" 2>/dev/null | cut -c1-300)"
+          fi
 
           # Write status.json
           jq -n \
@@ -94,3 +109,10 @@ jobs:
           SUMMARY=$(jq -r '.ai_summary' status.json | head -c 72)
           git commit -m "status: ${SUMMARY}" || git commit --allow-empty -m "chore: keep-alive [skip ci]"
           git push
+
+      - name: Fail if the AI summary could not be generated
+        if: env.GROQ_FAILED == '1'
+        run: |
+          echo "status.json was committed and pushed; only the AI summary is missing."
+          echo "See the keep-alive error annotation above for the Groq response."
+          exit 1

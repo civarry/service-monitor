@@ -86,4 +86,12 @@ jobs:
             -H "Prefer: return=representation" \
             -d "{\"type\": \"heartbeat\", \"message\": \"Daily heartbeat sent\"}"
 
-          echo "Heartbeat sent successfully at ${NOW}"
+          echo "Heartbeat sent at ${NOW}"
+
+          # Report goes out either way — a heartbeat that only fires when
+          # everything is healthy is not a heartbeat. But an unreachable
+          # Supabase must still turn the run red so GitHub notifies.
+          if [ "$TOTAL" = "?" ]; then
+            echo "::error title=daily-heartbeat::Supabase did not answer the count queries; report sent with counts unavailable"
+            exit 1
+          fi

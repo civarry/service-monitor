@@ -21,8 +21,36 @@ jobs:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           FORCE: ${{ inputs.force || 'false' }}
         run: |
-          curl -fsS -X POST \
+          RESPONSE=$(mktemp)
+          CODE=$(curl -sS --max-time 240 -o "$RESPONSE" -w '%{http_code}' -X POST \
             "${SUPABASE_URL}/functions/v1/daily-briefing" \
             -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
             -H "Content-Type: application/json" \
-            -d "{\"force\": ${FORCE}}"
+            -d "{\"force\": ${FORCE}}")
+
+          echo "HTTP $CODE"
+          cat "$RESPONSE"; echo
+
+          if [ "$CODE" != "200" ]; then
+            echo "::error title=daily-briefing::HTTP $CODE from the edge function"
+            exit 1
+          fi
+
+          # The function answers 200 even when it fails, putting the reason in
+          # .error — so the body, not the status line, is the health signal.
+          # `curl -fsS` cannot see this, which is why failures ran unnoticed.
+          if ! jq -e . "$RESPONSE" >/dev/null 2>&1; then
+            echo "::error title=daily-briefing::response was not JSON (gateway error page?)"
+            exit 1
+          fi
+          if jq -e 'has("error")' "$RESPONSE" >/dev/null; then
+            echo "::error title=daily-briefing::$(jq -r '.error' "$RESPONSE" | tr '\n' ' ' | cut -c1-300)"
+            exit 1
+          fi
+          # `.sent // false` would be wrong here: jq's // treats false itself as
+          # empty and returns the right-hand side, so a real sent=false would
+          # slip past. Compare explicitly.
+          if jq -e '.sent == false' "$RESPONSE" >/dev/null; then
+            echo "::error title=daily-briefing::Telegram rejected the message (sent=false)"
+            exit 1
+          fi

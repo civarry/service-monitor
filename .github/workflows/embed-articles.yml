@@ -15,8 +15,35 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: |
-          curl -fsS -X POST \
+          RESPONSE=$(mktemp)
+          CODE=$(curl -sS --max-time 180 -o "$RESPONSE" -w '%{http_code}' -X POST \
             "${SUPABASE_URL}/functions/v1/embed-articles" \
             -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
             -H "Content-Type: application/json" \
-            -d '{}'
+            -d '{}')
+
+          echo "HTTP $CODE"
+          cat "$RESPONSE"; echo
+
+          if [ "$CODE" != "200" ]; then
+            echo "::error title=embed-articles::HTTP $CODE from the edge function"
+            exit 1
+          fi
+
+          # The function answers 200 even when it fails, putting the reason in
+          # .error — so the body, not the status line, is the health signal.
+          # `curl -fsS` cannot see this, which is why failures ran unnoticed.
+          if ! jq -e . "$RESPONSE" >/dev/null 2>&1; then
+            echo "::error title=embed-articles::response was not JSON (gateway error page?)"
+            exit 1
+          fi
+          if jq -e 'has("error")' "$RESPONSE" >/dev/null; then
+            echo "::error title=embed-articles::$(jq -r '.error' "$RESPONSE" | tr '\n' ' ' | cut -c1-300)"
+            exit 1
+          fi
+          # Per-batch failures are collected rather than thrown, so a run can
+          # embed some articles and still have lost others. Surface those too.
+          if jq -e 'has("errors")' "$RESPONSE" >/dev/null; then
+            echo "::error title=embed-articles::$(jq -r '.errors | join("; ")' "$RESPONSE" | cut -c1-300)"
+            exit 1
+          fi

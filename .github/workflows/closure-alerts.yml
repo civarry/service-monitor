@@ -21,8 +21,29 @@ jobs:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           TEST: ${{ inputs.test || 'false' }}
         run: |
-          curl -fsS -X POST \
+          RESPONSE=$(mktemp)
+          CODE=$(curl -sS --max-time 120 -o "$RESPONSE" -w '%{http_code}' -X POST \
             "${SUPABASE_URL}/functions/v1/closure-alerts" \
             -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
             -H "Content-Type: application/json" \
-            -d "{\"test\": ${TEST}}"
+            -d "{\"test\": ${TEST}}")
+
+          echo "HTTP $CODE"
+          cat "$RESPONSE"; echo
+
+          if [ "$CODE" != "200" ]; then
+            echo "::error title=closure-alerts::HTTP $CODE from the edge function"
+            exit 1
+          fi
+
+          # The function answers 200 even when it fails, putting the reason in
+          # .error — so the body, not the status line, is the health signal.
+          # `curl -fsS` cannot see this, which is why failures ran unnoticed.
+          if ! jq -e . "$RESPONSE" >/dev/null 2>&1; then
+            echo "::error title=closure-alerts::response was not JSON (gateway error page?)"
+            exit 1
+          fi
+          if jq -e 'has("error")' "$RESPONSE" >/dev/null; then
+            echo "::error title=closure-alerts::$(jq -r '.error' "$RESPONSE" | tr '\n' ' ' | cut -c1-300)"
+            exit 1
+          fi
