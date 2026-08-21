@@ -11,7 +11,8 @@ import {
   ArticleWithId,
 } from "./lib/db.ts";
 import { digestCategory, CategoryDigest } from "./lib/groq.ts";
-import { sendTelegram, escapeHtml, LinkButton } from "./lib/telegram.ts";
+import { sendTelegram, sendPhoto, escapeHtml } from "./lib/telegram.ts";
+import { renderCard, CardSpec } from "./lib/card.ts";
 
 function taipeiDate(): string {
   return new Intl.DateTimeFormat("en-CA", {
@@ -228,17 +229,20 @@ function pickTopClusters(
   return clusterArticles(inCategory).slice(0, n);
 }
 
-// Plain text, deliberately unescaped: these become inline keyboard button
-// labels, and Telegram renders button text literally.
-function headlineButtons(items: ArticleWithId[], labels: string[]): LinkButton[] {
-  return items.map((it, i) => {
-    // Labels are 3-5 word phrases, but when Groq is down this falls back to the
-    // raw headline, which the articles table stores at up to 500 chars. A
-    // button that long wraps into an unreadable slab, so cap it.
-    const raw = (labels[i] && labels[i].trim()) || it.title;
-    const text = raw.length > 56 ? `${raw.slice(0, 55).trimEnd()}…` : raw;
-    return { text, url: it.url };
-  });
+// Labels are 3-5 word phrases, but when Groq is down they fall back to the raw
+// headline, which the articles table stores at up to 500 chars.
+function labelFor(it: ArticleWithId, label: string | undefined): string {
+  const raw = (label && label.trim()) || it.title;
+  return raw.length > 70 ? `${raw.slice(0, 69).trimEnd()}…` : raw;
+}
+
+// The caption travels with the image when the card is forwarded, so it carries
+// the sources rather than leaving a shared photo unattributed.
+function sourceCaption(emoji: string, label: string, items: ArticleWithId[], labels: string[]): string {
+  const links = items
+    .map((it, i) => `▸ <a href="${escapeHtml(it.url)}">${escapeHtml(labelFor(it, labels[i]))}</a>`)
+    .join("\n");
+  return `<b>${emoji} ${escapeHtml(label)}</b> · <i>${escapeHtml(taipeiDateLong())}</i>\n${links}`;
 }
 
 function formatWeather(w: Weather | null): string {
@@ -253,33 +257,55 @@ function formatWeather(w: Weather | null): string {
   ].join("\n");
 }
 
-// One card per section. An inline keyboard attaches to the bottom of a
-// message, so a single combined message could only ever carry one undivided
-// block of buttons — splitting the sections is what lets each headline sit
-// under the section it belongs to.
-interface Card {
-  text: string;
-  buttons?: LinkButton[];
-}
+// A text card is a plain message; a photo card is a rendered PNG whose caption
+// carries the source links. `fallback` is the text form, used both to store
+// message_text and to survive a rendering failure.
+type Card =
+  | { kind: "text"; text: string }
+  | { kind: "photo"; spec: CardSpec; caption: string; fallback: string };
 
 function sectionCard(
   emoji: string,
   label: string,
+  accent: string,
   digest: CategoryDigest,
   items: ArticleWithId[]
 ): Card {
   const header = `<b><u>${emoji} ${escapeHtml(label.toUpperCase())}</u></b>`;
-  if (items.length === 0) return { text: `${header}\n<i>nothing today</i>` };
+  if (items.length === 0) return { kind: "text", text: `${header}\n<i>nothing today</i>` };
 
-  const parts = [header];
-  if (digest.summary) parts.push(`<blockquote>${escapeHtml(digest.summary)}</blockquote>`);
-  return { text: parts.join("\n"), buttons: headlineButtons(items, digest.labels) };
+  const sources = [...new Set(items.map((it) => it.source))].join(", ");
+  const fallbackParts = [header];
+  if (digest.summary) fallbackParts.push(`<blockquote>${escapeHtml(digest.summary)}</blockquote>`);
+  fallbackParts.push(
+    items.map((it, i) => `▸ <a href="${escapeHtml(it.url)}">${escapeHtml(labelFor(it, digest.labels[i]))}</a>`).join("\n")
+  );
+
+  return {
+    kind: "photo",
+    spec: {
+      eyebrow: "Good Morning Taipei",
+      title: label,
+      date: taipeiDateLong(),
+      summary: digest.summary,
+      items: items.map((it, i) => labelFor(it, digest.labels[i])),
+      accent,
+      footer: `${items.length} ${items.length === 1 ? "story" : "stories"} · ${sources}`,
+    },
+    caption: sourceCaption(emoji, label, items, digest.labels),
+    fallback: fallbackParts.join("\n"),
+  };
 }
 
 // Below this, the TW↔PH section is hidden entirely (header + lonely bullet
 // looks broken). Counted in distinct clusters, not articles — five articles
 // of the same Marcos-OFW story would cluster to 1 and still be sparse.
 const TW_PH_MIN_CLUSTERS = 2;
+
+// One accent per section, the only thing that varies between cards.
+const ACCENT_TW = "#DC2626";
+const ACCENT_PH = "#1D4ED8";
+const ACCENT_TWPH = "#059669";
 
 // Convert a Cluster into the shape digestCategory expects, attaching other
 // outlets' descriptions as additional_coverage so the LLM can synthesize.
@@ -334,6 +360,7 @@ async function composeDigest(
 
   const cards: Card[] = [
     {
+      kind: "text",
       text: [
         `☀️ <b>Good Morning Taipei</b>`,
         `<i>${escapeHtml(taipeiDateLong())}</i>`,
@@ -341,14 +368,15 @@ async function composeDigest(
         formatWeather(weather),
       ].join("\n"),
     },
-    sectionCard("🇹🇼", "Taiwan", withClusterBadges(twDigest, twClusters), twClusters.map((c) => c.rep)),
-    sectionCard("🇵🇭", "Philippines", withClusterBadges(phDigest, phClusters), phClusters.map((c) => c.rep)),
+    sectionCard("🇹🇼", "Taiwan", ACCENT_TW, withClusterBadges(twDigest, twClusters), twClusters.map((c) => c.rep)),
+    sectionCard("🇵🇭", "Philippines", ACCENT_PH, withClusterBadges(phDigest, phClusters), phClusters.map((c) => c.rep)),
   ];
   if (showTwPh) {
     cards.push(
       sectionCard(
         "🤝",
         "Taiwan ↔ Philippines",
+        ACCENT_TWPH,
         withClusterBadges(twPhDigest, twPhClusters),
         twPhClusters.map((c) => c.rep)
       )
@@ -474,19 +502,37 @@ Deno.serve(async (req) => {
     }
 
     const cards = await composeDigest(weather, articles);
-    cards[0].text = footerFor(cards[0].text, degraded);
+    if (cards[0].kind === "text") {
+      cards[0].text = footerFor(cards[0].text, degraded);
+    }
 
     // Sent in order, and only the first buzzes the phone: a four-card stack
     // that fires four notifications is worse than the wall of text it replaced.
     let sent = true;
     for (const [i, card] of cards.entries()) {
-      const ok = await sendTelegram(card.text, card.buttons, i > 0);
+      const silent = i > 0;
+      let ok: boolean;
+
+      if (card.kind === "text") {
+        ok = await sendTelegram(card.text, silent);
+      } else {
+        try {
+          ok = await sendPhoto(await renderCard(card.spec), card.caption, silent);
+        } catch (err) {
+          // Rendering pulls fonts and a wasm binary over the network. If any of
+          // that fails the section still goes out, as text.
+          note(`card render (${card.spec.title})`, err);
+          ok = await sendTelegram(card.fallback, silent);
+        }
+      }
       if (!ok) sent = false;
     }
 
     // Stored joined, since the briefings table holds one message_text per day
     // and it backs both the dedup check and the /brief history.
-    const message = cards.map((c) => c.text).join("\n\n");
+    const message = cards
+      .map((c) => (c.kind === "text" ? c.text : c.fallback))
+      .join("\n\n");
 
     // After the send, deliberately: failing to record a briefing that did go
     // out is a bookkeeping problem, and previously it raised a "Briefing
