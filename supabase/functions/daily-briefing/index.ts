@@ -264,35 +264,50 @@ type Card =
   | { kind: "text"; text: string }
   | { kind: "photo"; spec: CardSpec; caption: string; fallback: string };
 
+/**
+ * `label` is the Telegram-facing name and may contain any character; `cardTitle`
+ * is what gets drawn into the image and must stay within the font's coverage.
+ * `digest` is the raw digest: cross-outlet counts come from `clusters` and are
+ * drawn as chips, rather than being baked into the label text as "✦2", which no
+ * Latin font subset can render.
+ */
 function sectionCard(
   emoji: string,
   label: string,
+  cardTitle: string,
   accent: string,
   digest: CategoryDigest,
-  items: ArticleWithId[]
+  clusters: Cluster[]
 ): Card {
   const header = `<b><u>${emoji} ${escapeHtml(label.toUpperCase())}</u></b>`;
+  const items = clusters.map((c) => c.rep);
   if (items.length === 0) return { kind: "text", text: `${header}\n<i>nothing today</i>` };
 
+  // Telegram text keeps the ✦ badges: they render fine outside the image.
+  const badged = withClusterBadges(digest, clusters);
   const sources = [...new Set(items.map((it) => it.source))].join(", ");
+
   const fallbackParts = [header];
   if (digest.summary) fallbackParts.push(`<blockquote>${escapeHtml(digest.summary)}</blockquote>`);
   fallbackParts.push(
-    items.map((it, i) => `▸ <a href="${escapeHtml(it.url)}">${escapeHtml(labelFor(it, digest.labels[i]))}</a>`).join("\n")
+    items.map((it, i) => `▸ <a href="${escapeHtml(it.url)}">${escapeHtml(labelFor(it, badged.labels[i]))}</a>`).join("\n")
   );
 
   return {
     kind: "photo",
     spec: {
       eyebrow: "Good Morning Taipei",
-      title: label,
+      title: cardTitle,
       date: taipeiDateLong(),
       summary: digest.summary,
-      items: items.map((it, i) => labelFor(it, digest.labels[i])),
+      items: items.map((it, i) => ({
+        text: labelFor(it, digest.labels[i]),
+        badge: clusters[i].members.length,
+      })),
       accent,
       footer: `${items.length} ${items.length === 1 ? "story" : "stories"} · ${sources}`,
     },
-    caption: sourceCaption(emoji, label, items, digest.labels),
+    caption: sourceCaption(emoji, label, items, badged.labels),
     fallback: fallbackParts.join("\n"),
   };
 }
@@ -368,17 +383,19 @@ async function composeDigest(
         formatWeather(weather),
       ].join("\n"),
     },
-    sectionCard("🇹🇼", "Taiwan", ACCENT_TW, withClusterBadges(twDigest, twClusters), twClusters.map((c) => c.rep)),
-    sectionCard("🇵🇭", "Philippines", ACCENT_PH, withClusterBadges(phDigest, phClusters), phClusters.map((c) => c.rep)),
+    sectionCard("🇹🇼", "Taiwan", "Taiwan", ACCENT_TW, twDigest, twClusters),
+    sectionCard("🇵🇭", "Philippines", "Philippines", ACCENT_PH, phDigest, phClusters),
   ];
   if (showTwPh) {
     cards.push(
       sectionCard(
         "🤝",
         "Taiwan ↔ Philippines",
+        // No arrow glyph in the drawn title: U+2194 is outside the font subsets.
+        "Taiwan & Philippines",
         ACCENT_TWPH,
-        withClusterBadges(twPhDigest, twPhClusters),
-        twPhClusters.map((c) => c.rep)
+        twPhDigest,
+        twPhClusters
       )
     );
   }
