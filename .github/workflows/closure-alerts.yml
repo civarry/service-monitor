@@ -15,6 +15,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # x-region pins execution to Tokyo. Supabase runs the function in the
+      # region nearest the caller, and the NCDR feed only answers east-Asian
+      # networks — so from US runners the feed fetch times out every time.
       - name: Trigger closure-alerts edge function
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -26,6 +29,7 @@ jobs:
             "${SUPABASE_URL}/functions/v1/closure-alerts" \
             -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
             -H "Content-Type: application/json" \
+            -H "x-region: ap-northeast-1" \
             -d "{\"test\": ${TEST}}")
 
           echo "HTTP $CODE"

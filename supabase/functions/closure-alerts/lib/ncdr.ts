@@ -51,14 +51,19 @@ function parseLocalityAndMessage(summary: string): { locality: string; message: 
   return { locality: m[1].trim(), message: m[2].trim() };
 }
 
-export async function fetchClosureAlerts(): Promise<ClosureAlert[]> {
-  const res = await fetch(NCDR_FEED_URL, {
-    headers: { "User-Agent": "civarry-closure-alerts/1.0" },
-    signal: AbortSignal.timeout(10000),
-  });
-  if (!res.ok) throw new Error(`ncdr feed: ${res.status}`);
-  const xml = await res.text();
+// The NCDR host only answers east-Asian networks: measured from Supabase edge
+// regions it responds in ~1s from ap-northeast-1/2 (Tokyo, Seoul) and never
+// answers at all from us-east-1, us-west-1, eu-west-2, ap-south-1,
+// ap-southeast-1/2. Supabase runs an edge function in the region nearest
+// whoever called it, so callers must pin `x-region: ap-northeast-1` (both the
+// GitHub Action and the /closures webhook do). Raising the timeout does not
+// help a blocked region, so this stays modest: it is headroom for a slow
+// answer, not a workaround for the wrong region.
+const FEED_TIMEOUT_MS = 15000;
+const FEED_ATTEMPTS = 2;
+const REGION = Deno.env.get("SB_REGION") ?? "unknown";
 
+function parseFeed(xml: string): ClosureAlert[] {
   const alerts: ClosureAlert[] = [];
   const entryRe = /<entry>([\s\S]*?)<\/entry>/g;
   let m: RegExpExecArray | null;
@@ -80,4 +85,24 @@ export async function fetchClosureAlerts(): Promise<ClosureAlert[]> {
     });
   }
   return alerts;
+}
+
+export async function fetchClosureAlerts(): Promise<ClosureAlert[]> {
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= FEED_ATTEMPTS; attempt++) {
+    try {
+      const res = await fetch(NCDR_FEED_URL, {
+        headers: { "User-Agent": "civarry-closure-alerts/1.0" },
+        signal: AbortSignal.timeout(FEED_TIMEOUT_MS),
+      });
+      if (!res.ok) throw new Error(`ncdr feed: HTTP ${res.status}`);
+      return parseFeed(await res.text());
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  const msg = lastErr instanceof Error ? lastErr.message : String(lastErr);
+  // Name the region: outside ap-northeast-1/2 this call cannot succeed, and
+  // that is invisible from the error alone.
+  throw new Error(`${msg} (${FEED_ATTEMPTS} attempts from region ${REGION})`);
 }

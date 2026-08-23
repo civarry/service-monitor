@@ -64,12 +64,24 @@ function makeTestAlert(): ClosureAlert {
   };
 }
 
+// "Signal timed out." on its own says nothing about which of the four network
+// calls gave up, which is exactly the question you have at 3am. Tag every
+// awaited step so the error that reaches Telegram/CI names the failing one.
+function step<T>(name: string, work: Promise<T>): Promise<T> {
+  return work.catch((err) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`${name}: ${msg}`);
+  });
+}
+
 Deno.serve(async (req) => {
   try {
     let body: { test?: boolean } = {};
     try { body = await req.json(); } catch { /* empty body is fine */ }
 
-    const alerts = body.test ? [makeTestAlert()] : await fetchClosureAlerts();
+    const alerts = body.test
+      ? [makeTestAlert()]
+      : await step("ncdr feed", fetchClosureAlerts());
     const now = new Date();
 
     // Translate everything in the feed once, up front, so both the actual
@@ -84,7 +96,7 @@ Deno.serve(async (req) => {
     // Fetched for the whole feed (not just candidates) so the /closures
     // summary can correctly report "already sent" vs. "not yet due" per
     // entry, instead of guessing from tracked/expired alone.
-    const seen = await fetchSeenIds(alerts.map((a) => a.id));
+    const seen = await step("db read", fetchSeenIds(alerts.map((a) => a.id)));
 
     const candidates = alerts.filter(
       (a) => isTracked(a.locality) && (!a.expires || a.expires > now)
@@ -93,13 +105,16 @@ Deno.serve(async (req) => {
 
     let sent = 0;
     for (const alert of fresh) {
-      const ok = await sendTelegram(formatAlert(alert, translations.get(alert.id) ?? null));
+      const ok = await step(
+        "telegram send",
+        sendTelegram(formatAlert(alert, translations.get(alert.id) ?? null))
+      );
       if (ok) sent++;
       // Mark seen regardless of Telegram delivery outcome — a delivery
       // failure shouldn't cause the same alert to retry forever and spam
       // once Telegram recovers; the underlying event is still valid info
       // on the source's own site if this one message is lost.
-      await markSeen(alert.id, alert.locality);
+      await step("db markSeen", markSeen(alert.id, alert.locality));
     }
 
     return new Response(

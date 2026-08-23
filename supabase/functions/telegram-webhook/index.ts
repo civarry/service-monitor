@@ -956,6 +956,11 @@ async function handleClosures(): Promise<string | null> {
       headers: {
         Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
         "Content-Type": "application/json",
+        // The NCDR feed only answers east-Asian networks, and Supabase runs an
+        // edge function in the region nearest its caller. Without this pin,
+        // /closures inherits whatever region this webhook happens to run in
+        // and the feed fetch times out.
+        "x-region": "ap-northeast-1",
       },
       body: JSON.stringify({}),
     });
