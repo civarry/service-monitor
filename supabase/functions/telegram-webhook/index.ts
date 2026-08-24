@@ -343,7 +343,7 @@ async function handleDrafts(): Promise<void> {
   const lines = drafts.map((d, i) => {
     const name = escapeHtml(d.name || "");
     const preview = escapeHtml((d.message || "").slice(0, 50));
-    return `${i + 1}. <b>${name}</b> — ${preview}...`;
+    return `${i + 1}. <b>${name}</b>: ${preview}...`;
   });
   const approveLinks = drafts
     .map((d) => `/approve_${(d.id || "").replace(/-/g, "")}`)
@@ -838,7 +838,7 @@ async function analyzeRepoGraph(): Promise<GapAnalysis> {
     weak: [...graph.edges]
       .sort((a, b) => a.sim - b.sim)
       .slice(0, 5)
-      .map((e) => `${repos[e.a].name} — ${repos[e.b].name} (${Math.round(e.sim * 100)}%)`),
+      .map((e) => `${repos[e.a].name} / ${repos[e.b].name} (${Math.round(e.sim * 100)}%)`),
     total: n,
   };
 }
@@ -851,7 +851,7 @@ async function generateNextProjectIdea(analysis: GapAnalysis): Promise<string | 
       .map((c, i) => `${i + 1}. [${c.lang}] ${c.blurbs.join("; ")}`)
       .join("\n");
     const scatteredLines = analysis.scattered
-      .map((s) => `- ${s.name}${s.desc ? ` — ${s.desc}` : ""}`)
+      .map((s) => `- ${s.name}${s.desc ? `: ${s.desc}` : ""}`)
       .join("\n");
     const prompt =
       "You are helping CJ, a developer, decide what to build next. His GitHub " +
@@ -859,7 +859,7 @@ async function generateNextProjectIdea(analysis: GapAnalysis): Promise<string | 
       "actually do.\n\n" +
       "Established themes (clustered work):\n" +
       `${clusterLines}\n\n` +
-      "Scattered projects — no strong relation to anything else he's built yet:\n" +
+      "Scattered projects, no strong relation to anything else he's built yet:\n" +
       `${scatteredLines || "- none"}\n\n` +
       "Things he ALREADY has, so never propose rebuilding them or thin " +
       "integrations of them: a portfolio website with a 3D repo graph, a " +
@@ -875,7 +875,7 @@ async function generateNextProjectIdea(analysis: GapAnalysis): Promise<string | 
       "- Weekend-scale and free-tier friendly. Stacks he knows: Python, " +
       "Swift (native macOS), JavaScript, Streamlit, Supabase.\n" +
       "- His style: he builds tools for things that are tedious, repetitive, " +
-      "or missing — practical over impressive.\n\n" +
+      "or missing. Practical over impressive.\n\n" +
       "Answer in exactly this format, no preamble:\n" +
       "Name: <project name>\n" +
       "What: <two sentences>\n" +
@@ -938,11 +938,11 @@ async function handleNextProject(args: string): Promise<string | null> {
   if (idea) {
     await sendTelegram(
       `<b>Next project idea</b>\n\n${escapeHtml(idea)}\n\n` +
-        `<i>/nextproject raw — see the gap analysis behind this</i>`
+        `<i>/nextproject raw: see the gap analysis behind this</i>`
     );
     return "Generated next-project idea";
   }
-  await sendTelegram(raw + "\n\n<i>AI suggestion failed — raw gap analysis above.</i>");
+  await sendTelegram(raw + "\n\n<i>AI suggestion failed. Raw gap analysis above.</i>");
   return null;
 }
 
@@ -992,7 +992,7 @@ async function handleClosures(): Promise<string | null> {
       msg = `No closures in the feed right now.`;
     } else {
       // English-first: the whole point of translating is readability, so
-      // lead with it and drop the boilerplate Chinese phone/agency line —
+      // lead with it and drop the boilerplate Chinese phone/agency line,
       // it's noise here. The full original still goes out on the real
       // Telegram alert when something actually fires.
       msg =
@@ -1011,7 +1011,7 @@ async function handleClosures(): Promise<string | null> {
               ? `${escapeHtml(f.locality_en)} (${escapeHtml(f.locality)})`
               : escapeHtml(f.locality);
             const summary = escapeHtml(f.message_en || f.message);
-            return `${dot} <b>${name}</b> — ${status}\n${summary}`;
+            return `${dot} <b>${name}</b>: ${status}\n${summary}`;
           })
           .join("\n\n");
     }
@@ -1040,14 +1040,14 @@ async function handleAudit(): Promise<string | null> {
     };
     const failing = h.repos.filter((r) => r.missing.length > 0);
 
-    let msg = `<b>Repo audit</b> (${escapeHtml(h.date)}) — ${h.passing}/${h.total} meet the standard`;
+    let msg = `<b>Repo audit</b> (${escapeHtml(h.date)}): ${h.passing}/${h.total} meet the standard`;
     if (failing.length === 0) {
       msg += "\n\nEverything is documented. Nothing to fix.";
     } else {
       msg +=
         `\n\n<b>Needs attention (${failing.length}):</b>\n` +
         failing
-          .map((r) => `• <b>${escapeHtml(r.name)}</b> — ${escapeHtml(r.missing.join(", "))}`)
+          .map((r) => `• <b>${escapeHtml(r.name)}</b>: ${escapeHtml(r.missing.join(", "))}`)
           .join("\n") +
         "\n\n<i>Standard: description (15+ chars), 3+ topics, README with real content. " +
         "Archive a repo to exclude it from the audit.</i>";
@@ -1056,7 +1056,7 @@ async function handleAudit(): Promise<string | null> {
     return "Repo audit sent";
   } catch {
     await sendTelegram(
-      "Couldn't load repo_health.json — has the Update Repo Health workflow run yet?"
+      "Couldn't load repo_health.json. Has the Update Repo Health workflow run yet?"
     );
     return null;
   }
@@ -1066,21 +1066,21 @@ async function handleAudit(): Promise<string | null> {
 
 async function handleSyncCommands(): Promise<string | null> {
   const commands = [
-    { command: "add", description: "Add content — /add project|skill" },
-    { command: "announce", description: "Site banner — /announce <msg> --flash 20s" },
+    { command: "add", description: "Add content: /add project|skill" },
+    { command: "announce", description: "Site banner: /announce <msg> --flash 20s" },
     { command: "approve", description: "Approve oldest draft reply" },
     { command: "audit", description: "Repo documentation audit" },
     { command: "brief", description: "Get the news briefing now" },
     { command: "closures", description: "Check Taipei/New Taipei/Taoyuan closures now" },
-    { command: "darkmode", description: "Toggle theme — /darkmode on|off" },
+    { command: "darkmode", description: "Toggle theme: /darkmode on|off" },
     { command: "drafts", description: "List pending draft replies" },
-    { command: "edit", description: "Replace draft — /edit [id] <text>" },
-    { command: "list", description: "View content — /list projects|skills" },
+    { command: "edit", description: "Replace draft: /edit [id] <text>" },
+    { command: "list", description: "View content: /list projects|skills" },
     { command: "news", description: "Same as /brief" },
     { command: "nextproject", description: "What to build next (add 'raw' for the gap analysis)" },
-    { command: "remove", description: "Remove content — /remove project|skill" },
+    { command: "remove", description: "Remove content: /remove project|skill" },
     { command: "synccommands", description: "Refresh this command menu" },
-    { command: "update", description: "Update content — /update bio|social|status" },
+    { command: "update", description: "Update content: /update bio|social|status" },
   ];
   const res = await fetch(
     `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setMyCommands`,
@@ -1092,7 +1092,7 @@ async function handleSyncCommands(): Promise<string | null> {
   );
   await sendTelegram(
     res.ok
-      ? `<b>Command menu updated</b> — ${commands.length} commands registered.`
+      ? `<b>Command menu updated</b>: ${commands.length} commands registered.`
       : "Failed to update the command menu."
   );
   return res.ok ? "Command menu synced" : null;
@@ -1101,7 +1101,7 @@ async function handleSyncCommands(): Promise<string | null> {
 // ---------- MAIN HANDLER ----------
 
 Deno.serve(async (req) => {
-  // Secret check disabled — protection comes from the chat_id filter below.
+  // Secret check disabled: protection comes from the chat_id filter below.
   // (Reinstate when TELEGRAM_WEBHOOK_SECRET env is reliably synced with the
   //  value passed to Telegram's setWebhook.)
 
@@ -1131,7 +1131,7 @@ Deno.serve(async (req) => {
     let logMsg: string | null = null;
 
     // Handle /approve_<id> and /edit_<id> commands
-    // IDs are dash-less UUIDs — restore dashes for DB lookup
+    // IDs are dash-less UUIDs, so restore dashes for DB lookup
     function restoreUUID(hex: string): string {
       if (hex.length === 32) {
         return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;

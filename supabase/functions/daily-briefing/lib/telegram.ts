@@ -35,7 +35,7 @@ export async function sendTelegram(text: string, silent = false): Promise<boolea
 
 /**
  * Caption is HTML, and its 1024-character limit applies *after* entity
- * parsing, so the <a> markup itself costs nothing against the budget — only
+ * parsing, so the <a> markup itself costs nothing against the budget. Only
  * the visible link labels count.
  */
 export async function sendPhoto(

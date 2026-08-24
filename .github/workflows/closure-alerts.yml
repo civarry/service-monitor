@@ -17,7 +17,7 @@ jobs:
     steps:
       # x-region pins execution to Tokyo. Supabase runs the function in the
       # region nearest the caller, and the NCDR feed only answers east-Asian
-      # networks — so from US runners the feed fetch times out every time.
+      # networks, so from US runners the feed fetch times out every time.
       - name: Trigger closure-alerts edge function
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -41,7 +41,7 @@ jobs:
           fi
 
           # The function answers 200 even when it fails, putting the reason in
-          # .error — so the body, not the status line, is the health signal.
+          # .error, so the body, not the status line, is the health signal.
           # `curl -fsS` cannot see this, which is why failures ran unnoticed.
           if ! jq -e . "$RESPONSE" >/dev/null 2>&1; then
             echo "::error title=closure-alerts::response was not JSON (gateway error page?)"

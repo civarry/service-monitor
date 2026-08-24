@@ -52,7 +52,7 @@ jobs:
             -H "Content-Type: application/json")
 
           # Ask Groq to generate a brief status summary
-          PROMPT="You are a concise system monitor. Given these stats for a contact form service, write a 1-2 sentence status summary. Be natural and brief.\n\nDate: ${TODAY}\nTotal messages: ${TOTAL}\nPending messages: ${PENDING}\nRecent activity: ${LOGS}\n\nRespond with ONLY the summary text, nothing else."
+          PROMPT="You are a concise system monitor. Given these stats for a contact form service, write a 1-2 sentence status summary. Be natural and brief. Never use em dashes; use a comma, colon, or period instead.\n\nDate: ${TODAY}\nTotal messages: ${TOTAL}\nPending messages: ${PENDING}\nRecent activity: ${LOGS}\n\nRespond with ONLY the summary text, nothing else."
 
           GROQ_RAW=$(mktemp)
           curl -s --max-time 60 "https://api.groq.com/openai/v1/chat/completions" \
@@ -75,7 +75,7 @@ jobs:
           # whole: when Groq retired the Llama models the status line silently
           # went generic for five days and nothing in the log said why. Keep the
           # fallback text, but record the reason and fail the job in a later
-          # step — aborting here would skip the commit that keeps Streamlit awake.
+          # step. Aborting here would skip the commit that keeps Streamlit awake.
           if [ -z "$SUMMARY" ]; then
             SUMMARY="System operational."
             echo "GROQ_FAILED=1" >> "$GITHUB_ENV"
@@ -93,7 +93,11 @@ jobs:
               last_updated: $timestamp,
               date: $date,
               messages: { total: ($total | tonumber? // 0), pending: ($pending | tonumber? // 0) },
-              ai_summary: $summary
+              # status.json is committed, and the commit message is built from
+              # this field, so a model-written em dash would land in the repo
+              # and turn the Lint gate red on a bot push. The prompt asks for
+              # none; this guarantees it.
+              ai_summary: ($summary | gsub(" *[\u2014\u2015] *"; ", "))
             }' > status.json
 
           echo "Summary: ${SUMMARY}"

@@ -34,7 +34,7 @@ function formatAlert(a: ClosureAlert, translation: Translation | null): string {
 
   // Chinese original and English rendering share one quote block: they are the
   // same notice, and splitting them into two blocks reads as two alerts. Not
-  // expandable — a closure alert is exactly the thing you read at a glance.
+  // expandable: a closure alert is exactly the thing you read at a glance.
   const body = translation
     ? `${escapeHtml(a.message)}\n\n${escapeHtml(translation.messageEn)}`
     : escapeHtml(a.message);
@@ -51,7 +51,7 @@ function formatAlert(a: ClosureAlert, translation: Translation | null): string {
 // Injects one synthetic alert instead of fetching the real feed, so
 // end-to-end delivery (Telegram formatting, dedup) can be verified without
 // waiting for an actual typhoon. Uses a fixed id, so a second {"test":true}
-// call correctly reports "new":0 — proving dedup works too.
+// call correctly reports "new":0, proving dedup works too.
 function makeTestAlert(): ClosureAlert {
   const now = new Date();
   return {
@@ -86,7 +86,7 @@ Deno.serve(async (req) => {
 
     // Translate everything in the feed once, up front, so both the actual
     // Telegram alert (for new ones) and the /closures feed summary (for
-    // everything) show English — not just whichever entries happen to be new.
+    // everything) show English, not just whichever entries happen to be new.
     const translations = new Map<string, Translation | null>(
       await Promise.all(
         alerts.map(async (a) => [a.id, await translateAlert(a.locality, a.message)] as const)
@@ -110,7 +110,7 @@ Deno.serve(async (req) => {
         sendTelegram(formatAlert(alert, translations.get(alert.id) ?? null))
       );
       if (ok) sent++;
-      // Mark seen regardless of Telegram delivery outcome — a delivery
+      // Mark seen regardless of Telegram delivery outcome. A delivery
       // failure shouldn't cause the same alert to retry forever and spam
       // once Telegram recovers; the underlying event is still valid info
       // on the source's own site if this one message is lost.
@@ -123,7 +123,7 @@ Deno.serve(async (req) => {
         tracked_active: candidates.length,
         new: fresh.length,
         sent,
-        // Everything currently in the feed, tracked or not, expired or not —
+        // Everything currently in the feed, tracked or not, expired or not.
         // lets a caller (e.g. the /closures Telegram command) show what's
         // actually there instead of just a count.
         feed: alerts.map((a) => {

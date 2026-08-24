@@ -1,0 +1,21 @@
+name: Lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  no-emdash:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # status.json is written by the keep-alive job from model output, so its
+      # generator strips em dashes before committing. If this ever fails on a
+      # bot push, fix the generator rather than excluding the file.
+      - name: No em dashes
+        run: python3 scripts/no-emdash.py

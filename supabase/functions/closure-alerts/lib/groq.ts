@@ -1,6 +1,6 @@
 const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY")!;
 // Groq retired llama-3.1-8b-instant. gpt-oss-20b is a reasoning model, so
-// reasoning tokens count against max_tokens — hence the larger budget.
+// reasoning tokens count against max_tokens, hence the larger budget.
 const FAST_MODEL = "openai/gpt-oss-20b";
 
 export interface Translation {

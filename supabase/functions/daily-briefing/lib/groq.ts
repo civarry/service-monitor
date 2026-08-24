@@ -1,11 +1,11 @@
 const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY")!;
 // Groq retired the Llama 3.x line; these are the current replacements. Both are
-// reasoning models, so reasoning tokens are billed against max_tokens — the
+// reasoning models, so reasoning tokens are billed against max_tokens, so the
 // budgets below are sized for reasoning + output, not output alone.
 const FAST_MODEL = "openai/gpt-oss-20b";
 const SMART_MODEL = "openai/gpt-oss-120b";
 
-// Skip prose synthesis below this threshold — too thin to summarize without
+// Skip prose synthesis below this threshold, which is too thin to summarize without
 // hallucinating filler or meta-narrating about gaps. Bullets alone suffice.
 const MIN_ARTICLES_FOR_SUMMARY = 3;
 
@@ -104,23 +104,24 @@ async function writeSummary(
   );
 
   const multiSourceNote = hasMultiSource
-    ? `\n\nSome stories below are covered by multiple outlets — the "[Also covered by SOURCE]" lines give you additional facts from those outlets about the same event. Synthesize across them when writing the summary. Prefer concrete details from any cluster member over generic phrasing.`
+    ? `\n\nSome stories below are covered by multiple outlets. The "[Also covered by SOURCE]" lines give you additional facts from those outlets about the same event. Synthesize across them when writing the summary. Prefer concrete details from any cluster member over generic phrasing.`
     : "";
 
   const prompt =
     `You are a senior journalist writing the 7 AM ${label} section of a Taipei reader's morning briefing.\n\n` +
     `Headlines (numbered; description and any cross-outlet coverage follow):\n${bullets}${multiSourceNote}\n\n` +
     `Write a fact-dense 3-sentence summary (roughly 70-90 words total).\n\n` +
-    `LEAD SELECTION — open with the SINGLE most consequential story. Use this ranking:\n` +
+    `LEAD SELECTION: open with the SINGLE most consequential story. Use this ranking:\n` +
     `  HIGH consequence: natural disasters in progress (eruptions, typhoons, earthquakes), deaths affecting many, large financial figures (NT$/PHP billions), national-security or military actions, named government officials acting on policy, large-scale protests, public-health events.\n` +
     `  LOW consequence: local crime, individual missing-persons (unless tied to a broader event), festivals, soft features, board appointments, individual scholarships, weather absent disaster.\n` +
-    `If multiple HIGH items exist, prefer the one with the most concrete numeric/named detail in its description. Stories covered by multiple outlets are a soft signal of importance — break ties in their favor.\n\n` +
+    `If multiple HIGH items exist, prefer the one with the most concrete numeric/named detail in its description. Stories covered by multiple outlets are a soft signal of importance, so break ties in their favor.\n\n` +
     `Return ONLY valid JSON, no markdown:\n` +
     `{ "summary": "..." }\n\n` +
     `Hard rules:\n` +
     `- Exactly 3 sentences. Cover at least 3 different headlines from the list.\n` +
-    `- Group related stories thematically when natural (e.g., "The Marcos administration moved on three fronts — A, B, and C"). Do NOT chain unrelated items with "Meanwhile...", "In other news...", "Also...".\n` +
+    `- Group related stories thematically when natural (e.g., "The Marcos administration moved on three fronts: A, B, and C"). Do NOT chain unrelated items with "Meanwhile...", "In other news...", "Also...".\n` +
     `- Use specific facts from the descriptions: dollar amounts, percentages, named people, place names, times.\n` +
+    `- Never use em dashes. Use a comma, colon, or period instead.\n` +
     `- END ON A FACT. No editorial closer. BANNED phrases: "boon for", "is significant", "underscores", "highlights the importance", "reflects the country's", "speaks to", "this comes as", "remains to be seen", "a testament to", "marks a milestone", "is a positive sign".\n` +
     `- NEVER meta-narrate about the input. BANNED phrases: "details are scarce", "no other major developments", "limited information", "other headlines mention", "the rest of the news", "remaining stories".\n` +
     `- If a headline lacks a concrete fact, silently omit it rather than apologizing for the gap or inventing one.\n` +
@@ -137,7 +138,7 @@ export async function digestCategory(
   if (articles.length === 0) return { summary: null, labels: [] };
   const limited = articles.slice(0, 5);
 
-  // Thin section — only labels, no synthesis. The section() renderer handles
+  // Thin section: only labels, no synthesis. The section() renderer handles
   // a null summary by emitting just the header + bullets.
   if (limited.length < MIN_ARTICLES_FOR_SUMMARY) {
     const labels = await generateLabels(limited);

@@ -68,7 +68,7 @@ async function gatherArticles(briefingDate: string): Promise<ArticleRow[]> {
           // don't mention any Taiwan-anchor term. Taipei Times' main feed
           // mixes in international wire (Fed Reserve, Iran/NK) and soft
           // features (cosplay) that don't belong in a Taipei-reader briefing.
-          // Articles re-routed to tw-ph by the previous check are kept —
+          // Articles re-routed to tw-ph by the previous check are kept:
           // those are cross-coverage and intentionally cross-categorical.
           if (
             feed.category === "tw-news" &&
@@ -147,7 +147,7 @@ function cosine(a: number[], b: number[]): number {
 
 // Clustering: group articles about the same event across sources. The
 // briefing then picks top clusters by SIZE (most-covered story), not top
-// articles by recency — surfaces what everyone is actually talking about.
+// articles by recency, which surfaces what everyone is actually talking about.
 //
 // Threshold tuned looser than dedupe (0.85): catches genuine same-event
 // coverage with different angles, not just verbatim syndication. Members
@@ -155,7 +155,7 @@ function cosine(a: number[], b: number[]): number {
 // can synthesize across outlets.
 //
 // Fallback to Jaccard for articles missing embeddings (Voyage outage or
-// not-yet-processed) — briefing never breaks on embedding state.
+// not-yet-processed), so the briefing never breaks on embedding state.
 const CLUSTER_COSINE_THRESHOLD = 0.80;
 const CLUSTER_JACCARD_THRESHOLD = 0.4;
 
@@ -313,7 +313,7 @@ function sectionCard(
 }
 
 // Below this, the TW↔PH section is hidden entirely (header + lonely bullet
-// looks broken). Counted in distinct clusters, not articles — five articles
+// looks broken). Counted in distinct clusters, not articles: five articles
 // of the same Marcos-OFW story would cluster to 1 and still be sparse.
 const TW_PH_MIN_CLUSTERS = 2;
 
@@ -418,7 +418,7 @@ async function repoHygieneLine(): Promise<string | null> {
     const names = failing.slice(0, 5).map((r) => r.name).join(", ");
     const more = failing.length > 5 ? ` +${failing.length - 5} more` : "";
     return (
-      `🧹 <b>Repo hygiene</b> — ${h.passing}/${h.total} documented. ` +
+      `🧹 <b>Repo hygiene</b>: ${h.passing}/${h.total} documented. ` +
       `Needs attention: ${escapeHtml(names)}${more} · /audit for details`
     );
   } catch {
@@ -496,7 +496,7 @@ Deno.serve(async (req) => {
     }
 
     // Embedding freshly upserted rows happens on the independent embed-articles
-    // cron, not triggered from here — clustering falls through to Jaccard for
+    // cron, not triggered from here, so clustering falls through to Jaccard for
     // articles too new to have vectors yet, and the /30-min cron catches up.
     //
     // The stored rows are preferred because they carry ids, embeddings and
@@ -560,7 +560,7 @@ Deno.serve(async (req) => {
       note("briefing save", err);
     }
 
-    // Sent as its own message rather than appended to the news digest —
+    // Sent as its own message rather than appended to the news digest:
     // an unrelated repo-maintenance nag doesn't belong in the same bubble
     // as the morning weather/news briefing.
     try {

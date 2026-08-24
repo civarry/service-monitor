@@ -33,7 +33,7 @@ let fontsPromise: Promise<{ name: string; data: ArrayBuffer; weight: 400 | 600 |
 let wasmReady: Promise<void> | null = null;
 
 // latin covers ASCII, accents, curly quotes, dashes and the degree sign;
-// latin-ext adds the currency block, where ₱ lives — Philippine headlines quote
+// latin-ext adds the currency block, where ₱ lives, and Philippine headlines quote
 // peso figures constantly.
 //
 // The two subsets MUST carry different family names. satori resolves a family

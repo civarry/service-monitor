@@ -37,7 +37,7 @@ jobs:
           fi
 
           # The function answers 200 even when it fails, putting the reason in
-          # .error — so the body, not the status line, is the health signal.
+          # .error, so the body, not the status line, is the health signal.
           # `curl -fsS` cannot see this, which is why failures ran unnoticed.
           if ! jq -e . "$RESPONSE" >/dev/null 2>&1; then
             echo "::error title=daily-briefing::response was not JSON (gateway error page?)"
@@ -59,5 +59,5 @@ jobs:
           # names what it lost in .degraded. A warning, not a failure: the
           # briefing did go out, and the reader sees the same note on it.
           if jq -e 'has("degraded")' "$RESPONSE" >/dev/null; then
-            echo "::warning title=daily-briefing::sent with degraded data — $(jq -r '.degraded | join("; ")' "$RESPONSE" | cut -c1-300)"
+            echo "::warning title=daily-briefing::sent with degraded data: $(jq -r '.degraded | join("; ")' "$RESPONSE" | cut -c1-300)"
           fi

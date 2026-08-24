@@ -1,9 +1,9 @@
-// @ts-ignore — Supabase global injected at runtime in edge functions
+// @ts-ignore: Supabase global injected at runtime in edge functions
 let _session: { run: (text: string, opts: unknown) => Promise<number[]> } | null = null;
 
 function getSession() {
   if (!_session) {
-    // @ts-ignore — Supabase.ai is provided by the edge runtime
+    // @ts-ignore: Supabase.ai is provided by the edge runtime
     _session = new Supabase.ai.Session("gte-small");
   }
   return _session!;

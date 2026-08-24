@@ -6,7 +6,7 @@ export interface Feed {
   category: Exclude<Category, "tw-ph">;
 }
 
-// Focus Taiwan (CNA English) does not currently expose a public RSS feed —
+// Focus Taiwan (CNA English) does not currently expose a public RSS feed:
 // every documented path (/rss/index, /rss, /feed, CNA's aspx variants)
 // returns 404 as of May 2026. Leaving TW single-source until a working
 // Taiwan-anchored English feed is identified.

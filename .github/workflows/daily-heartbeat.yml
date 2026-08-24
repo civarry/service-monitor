@@ -88,7 +88,7 @@ jobs:
 
           echo "Heartbeat sent at ${NOW}"
 
-          # Report goes out either way — a heartbeat that only fires when
+          # Report goes out either way: a heartbeat that only fires when
           # everything is healthy is not a heartbeat. But an unreachable
           # Supabase must still turn the run red so GitHub notifies.
           if [ "$TOTAL" = "?" ]; then

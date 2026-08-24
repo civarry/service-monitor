@@ -2,7 +2,7 @@
 // Reduction) CAP Atom feed for 停班停課 (work/school closure) alerts.
 // This is the government's own designated machine-readable distribution
 // channel for this data (linked from the DGPA dataset on data.gov.tw,
-// rights: Public Domain) — not a scrape of the DGPA HTML page, which
+// rights: Public Domain), not a scrape of the DGPA HTML page, which
 // disallows all crawlers except Googlebot via robots.txt.
 export const NCDR_FEED_URL = "https://alerts.ncdr.nat.gov.tw/RssAtomFeed.ashx?AlertType=33";
 
@@ -30,7 +30,7 @@ function decodeEntities(s: string): string {
     .replace(/&#39;/g, "'");
 }
 
-// CAP dates in this feed look like "2026/8/9 上午 08:30:00" — always
+// CAP dates in this feed look like "2026/8/9 上午 08:30:00", and are always
 // Taiwan wall-clock time (UTC+8), no explicit offset in the string itself.
 function parseCapDateTime(raw: string): Date | null {
   const m = /^(\d{4})\/(\d{1,2})\/(\d{1,2})\s+(上午|下午)\s+(\d{1,2}):(\d{2}):(\d{2})$/.exec(raw.trim());
